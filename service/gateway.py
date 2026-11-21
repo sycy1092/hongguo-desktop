@@ -211,6 +211,20 @@ def create_app(provider, token, media_manager=None, signer_ok=lambda: True):
             raise ProviderError("INPUT_INVALID", "收藏状态不正确", 400)
         return provider.favorite(payload.get("seriesId"), payload["favorite"], payload.get("expectedUid"))
 
+    @app.get("/reservations/upcoming")
+    def reservation_upcoming(date: str = Query("", max_length=8), cursor: str = Query("", max_length=8)):
+        return provider.reservation_calendar(date, cursor)
+
+    @app.get("/account/reservations")
+    def reservations(refresh: bool = Query(False)):
+        return provider.reservations(refresh)
+
+    @app.post("/account/reservation")
+    def reservation(payload: dict = Body(...)):
+        if not isinstance(payload.get("reserved"), bool):
+            raise ProviderError("INPUT_INVALID", "预约状态不正确", 400)
+        return provider.reserve(payload.get("itemId"), payload["reserved"], payload.get("expectedUid"))
+
     if media_manager is not None:
         from media import mount_media
         mount_media(app, media_manager)

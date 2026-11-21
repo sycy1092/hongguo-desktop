@@ -20,7 +20,7 @@ try{
   await page.locator(`.series-card[data-series-id="${first}"]`).first().locator('.series-poster-button').click({timeout:60000});
   await page.getByRole('dialog').getByRole('button',{name:'播放第 54 集',exact:true}).click({timeout:30000});
   for(const episode of [54,55,70]){
-    if(episode!==54)await page.locator('.player-page .episode-grid button').filter({hasText:new RegExp(`^${episode}$`)}).click();
+    if(episode!==54){await page.locator('.video-stage').hover({position:{x:20,y:20}});await page.getByLabel('选集与季').click();await page.locator('.player-drawer').waitFor({timeout:10000});await page.locator('.player-drawer .episode-grid button').filter({hasText:new RegExp(`^${episode}$`)}).click();await page.getByLabel('关闭选集').click();}
     await expect.poll(()=>decoded(episode),{timeout:90000}).toBe(true);
     const frame=await page.locator('video[data-active=true]').evaluate(video=>({width:video.videoWidth,height:video.videoHeight,time:video.currentTime,series:video.dataset.seriesId,episode:Number(video.dataset.episode)}));
     check(`PC 实际解码第 ${episode} 集`,frame.series===first&&frame.episode===episode&&frame.width>0&&frame.time>1,frame);

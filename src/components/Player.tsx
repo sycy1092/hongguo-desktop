@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Play, Pause, SkipForward, Volume2, VolumeX, Maximize, Minimize, MessageSquare, RotateCcw, ChevronLeft, ChevronRight, X, Heart, Monitor, SlidersHorizontal, LoaderCircle, Keyboard } from 'lucide-react';
+import { ArrowLeft, Play, Pause, SkipForward, Volume2, VolumeX, Maximize, Minimize, MessageSquare, RotateCcw, ChevronRight, X, Heart, Monitor, SlidersHorizontal, LoaderCircle, Keyboard, ListVideo } from 'lucide-react';
 import type { CommentsPage, Episode, Series, SeriesDetail, Settings } from '../../shared/contracts';
 import { SeamlessSwitcher, type PlaybackTarget } from '../playback/SeamlessSwitcher';
 import { HlsDeckLoader, type VideoDeck } from '../playback/HlsDeck';
@@ -14,8 +14,10 @@ import Danmaku from './Danmaku';
 import DanmakuPanel from './DanmakuPanel';
 import SeasonOverview from './SeasonOverview';
 import { PlayerShortcutGuide, playerShortcut } from './PlayerShortcuts';
-import {message} from './ui';
+import { message } from './ui';
 import './Player.css';
+import './PlayerDrawer.css';
+import './PlayerHeading.css';
 import './PlayerAutoSwitch.css';
 type Props = { detail: SeriesDetail; initialEpisode: number; initialPosition?: number; isActive?: boolean; settings: Settings; accountKey?: string; onClose: () => void; onSettings: (patch: Partial<Settings>) => void; onLibrary: () => void;onSeries?:(detail:SeriesDetail)=>void };
 type SeasonState={source:string;phase:'idle'|'looking'|'identified'|'preparing'|'ready'|'none'|'ambiguous'|'error';destination:SeasonDestination|null;error:string};
@@ -38,6 +40,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const episodeDurations=useRef(new Map<string,number>());
   const theaterScroll=useRef(0),theaterRef=useRef(false);
   const danmakuPanelRef = useRef(false);
+  const drawerRef = useRef(false), drawerBody = useRef<HTMLDivElement>(null);
   const shortcutDialog = useRef<HTMLDialogElement>(null);
   const pendingDanmaku = useRef<DanmakuPreferences | null>(null);
   const favoritePending=useRef(false);
@@ -55,6 +58,15 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const [muted, setMuted] = useState(false), [comments, setComments] = useState(false), [theater, setTheater] = useState(false), [favorite, setFavorite] = useState(false), [notice, setNotice] = useState(''), [fullscreen, setFullscreen] = useState(false);
   const [pendingPosition,setPendingPosition]=useState<number|null>(null);
   const [danmakuPanel, setDanmakuPanel] = useState(false), [danmakuRefresh, setDanmakuRefresh] = useState(0);
+  const [drawer, setDrawer] = useState(false);
+  useEffect(() => {
+    // Open the drawer with the episode being played already in view.
+    if (!drawer) return;
+    const body = drawerBody.current, selected = body?.querySelector<HTMLElement>('.episode-grid .selected');
+    if (!body || !selected) return;
+    const box = selected.getBoundingClientRect(), area = body.getBoundingClientRect();
+    body.scrollTop += box.top - area.top - area.height / 2 + box.height / 2;
+  }, [drawer, episode, detail.series.id]);
   const [danmakuStatus, setDanmakuStatus] = useState<DanmakuStatus>({ loading: false, loaded: 0, error: '' });
   const [danmakuSettings, setDanmakuSettings] = useState(() => danmakuPreferences(settings.danmaku));
   useEffect(() => { const saved = danmakuPreferences(settings.danmaku); if (pendingDanmaku.current && JSON.stringify(saved) !== JSON.stringify(pendingDanmaku.current)) return; pendingDanmaku.current = null; setDanmakuSettings(saved); }, [settings.danmaku]);
@@ -84,7 +96,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   }, []);
   const save = useCallback(() => saveDeck(current()), [saveDeck]);
   const cancelSeasonPick=useCallback(()=>{if(!seasonPick.current)return;seasonPick.current=null;seasonPickSequence.current++;setPickingSeason('');switcher.current?.cancelPending();requested.current=null;setPendingEpisode(null);setPendingPosition(null);},[]);
-  const scheduleChromeHide = useCallback(() => { clearTimeout(hideTimer.current); if (danmakuPanelRef.current) return; hideTimer.current = setTimeout(() => { if (current()?.video && !current()?.video.paused && !danmakuPanelRef.current) setChrome(false); }, 2500); }, []);
+  const scheduleChromeHide = useCallback(() => { clearTimeout(hideTimer.current); if (danmakuPanelRef.current || drawerRef.current) return; hideTimer.current = setTimeout(() => { if (current()?.video && !current()?.video.paused && !danmakuPanelRef.current && !drawerRef.current) setChrome(false); }, 2500); }, []);
   const hide = useCallback(() => { setChrome(true); scheduleChromeHide(); }, [scheduleChromeHide]);
   const openShortcuts = useCallback(() => {
     const dialog = shortcutDialog.current;
@@ -94,6 +106,8 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const updateDanmaku = useCallback((patch: Partial<DanmakuPreferences>) => { const next = danmakuPreferences({ ...(pendingDanmaku.current ?? danmakuPreferences(latest.current.settings.danmaku)), ...patch }); pendingDanmaku.current = next; setDanmakuSettings(next); latest.current.onSettings({ danmaku: next }); hide(); }, [hide]);
   const closeDanmakuPanel = useCallback(() => { danmakuPanelRef.current = false; setDanmakuPanel(false); hide(); }, [hide]);
   const toggleDanmakuPanel = useCallback(() => { danmakuPanelRef.current = !danmakuPanelRef.current; setDanmakuPanel(danmakuPanelRef.current); hide(); }, [hide]);
+  const closeDrawer = useCallback(() => { drawerRef.current = false; setDrawer(false); hide(); }, [hide]);
+  const toggleDrawer = useCallback(() => { drawerRef.current = !drawerRef.current; setDrawer(drawerRef.current); if (drawerRef.current) { danmakuPanelRef.current = false; setDanmakuPanel(false); } hide(); }, [hide]);
   useEffect(()=>{const sid=detail.series.id,account=accountKey;let active=true;setFavorite(false);const apply=(lib:Awaited<ReturnType<typeof window.hongguo.getLibrary>>)=>{if(active&&latest.current.accountKey===account&&latest.current.detail.series.id===sid)setFavorite(lib.favorites.some(series=>series.id===sid));};const release=window.hongguo.onLibrary(apply);void window.hongguo.getLibrary().then(apply).catch(()=>{});return()=>{active=false;release();};},[detail.series.id,accountKey]);
   useEffect(()=>{
     if(!notice||favoriteBusy)return;
@@ -343,6 +357,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
           updateDanmaku({ enabled: !(pendingDanmaku.current ?? danmakuPreferences(latest.current.settings.danmaku)).enabled });
           break;
         case 'escape':
+          if (drawerRef.current) { closeDrawer(); return; }
           if (danmakuPanelRef.current) { closeDanmakuPanel(); return; }
           if (document.fullscreenElement === playbackLayout.current) void document.exitFullscreen().catch(() => {});
           else if (theaterRef.current) toggleTheater();
@@ -388,15 +403,14 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   },[isActive,finishEpisode,error]);
   const ended = (index: number) => { const deck=current();if(deck?.index===index)finishEpisode(deck); };
   const atSeasonEnd=nextEpisode()===Math.max(...detail.episodes.map(item=>item.index));
-  const previousEpisode = adjacentEpisode(detail.episodes, nextEpisode(), -1);
   const canAdvance=adjacentEpisode(detail.episodes, nextEpisode(), 1)!==undefined||atSeasonEnd&&!['none','ambiguous'].includes(seasonInfo.phase);
   const playIntent=playing||(continuing||!!pickingSeason)&&shouldPlay.current;
   const retrySeason=()=>{if(seasonRef.current.destination?.detail){setError('');retryTarget.current=null;prepareSeason(seasonRef.current.destination);}else void lookupSeason(true);};
-  const stageClassName=['video-stage',chrome?'':'controls-hidden',automaticPreparing?'auto-switching':''].filter(Boolean).join(' ');
+  const stageClassName=['video-stage',chrome?'':'controls-hidden',automaticPreparing?'auto-switching':'',drawer?'drawer-open':''].filter(Boolean).join(' ');
   const sliderPosition = duration ? Math.min(duration, pendingPosition ?? position) : 0;
   return <div className={`player-page ${theater?'player-theater':''}`}>
-    <div className="player-heading"><button className="btn" onClick={close}><ArrowLeft size={17}/> 返回</button><div><h2>{detail.series.title}</h2><span>第 {episode} 集 · 共 {detail.episodes.length} 集</span>{pendingEpisode&&<small className="switch-status">{pendingPosition!==null?`正在定位到 ${time(pendingPosition)}`:`正在准备第 ${pendingEpisode} 集，保留当前画面`}</small>}</div><button className={`icon-button player-favorite ${favorite?'active':''}`} title={favoriteBusy?'正在同步收藏':favorite?'取消收藏':'收藏'} aria-label={favoriteBusy?'正在同步收藏':favorite?'取消收藏':'收藏'} aria-pressed={favorite} disabled={favoriteBusy} onClick={()=>void changeFavorite()}>{favoriteBusy?<LoaderCircle className="spin" size={20}/>:<Heart size={20} fill={favorite?'currentColor':'none'}/>}</button></div>
-    <div className="playback-layout" ref={playbackLayout}><div className={stageClassName} onMouseMove={hide} onMouseLeave={()=>{if(playing&&!danmakuPanelRef.current)setChrome(false);}}>
+    <div className="player-heading"><button className="btn" onClick={close}><ArrowLeft size={17}/> 返回</button><div className="player-heading-title"><h2>{detail.series.title}</h2><span>第 {episode} 集 · 共 {detail.episodes.length} 集</span>{pendingEpisode&&<small className="switch-status">{pendingPosition!==null?`正在定位到 ${time(pendingPosition)}`:`正在准备第 ${pendingEpisode} 集，保留当前画面`}</small>}</div>{detail.series.intro.trim()&&<p className="player-heading-intro" title={detail.series.intro}>{detail.series.intro}</p>}<button className={`icon-button player-favorite ${favorite?'active':''}`} title={favoriteBusy?'正在同步收藏':favorite?'取消收藏':'收藏'} aria-label={favoriteBusy?'正在同步收藏':favorite?'取消收藏':'收藏'} aria-pressed={favorite} disabled={favoriteBusy} onClick={()=>void changeFavorite()}>{favoriteBusy?<LoaderCircle className="spin" size={20}/>:<Heart size={20} fill={favorite?'currentColor':'none'}/>}</button></div>
+    <div className="playback-layout" ref={playbackLayout}><div className={stageClassName} onMouseMove={hide} onMouseLeave={()=>{if(playing&&!danmakuPanelRef.current&&!drawerRef.current)setChrome(false);}}>
 
       <div className="window-drag-region" aria-hidden="true" />
       {!current()&&!error&&<div className="player-startup-cover" aria-hidden="true">{detail.series.cover&&<img src={detail.series.cover} alt=""/>}<div/></div>}
@@ -425,12 +439,21 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
           <input className="volume-slider" aria-label="音量" type="range" min="0" max="1" step=".05" value={muted?0:settings.volume} onChange={e=>{setMuted(false);onSettings({volume:Number(e.target.value)});}}/>
           <select aria-label="播放倍速" value={settings.rate} onChange={e=>{onSettings({rate:Number(e.target.value)});e.currentTarget.blur();hide();}}>{rates.map(r=><option key={r} value={r}>{r}×</option>)}</select>
           <select aria-label="播放画质" value={settings.quality} onChange={e=>{onSettings({quality:e.target.value});e.currentTarget.blur();hide();}}>{['auto','1080p','720p','540p','480p'].map(q=><option key={q} value={q}>{q==='auto'?'自动':q}</option>)}</select>
+          <button className={`icon-button ${drawer?'active':''}`} title="选集与季" aria-label="选集与季" aria-expanded={drawer} onClick={event=>{event.stopPropagation();toggleDrawer();}}><ListVideo size={20}/></button>
           <button className={`icon-button ${comments?'active':''}`} title="评论" onClick={()=>setComments(v=>!v)}><MessageSquare size={20}/></button>
           <button className="icon-button" type="button" title="播放快捷键（?）" aria-label="播放快捷键" aria-haspopup="dialog" onClick={event => { event.stopPropagation(); openShortcuts(); }}><Keyboard size={19}/></button>
           <button className={theater?'icon-button active':'icon-button'} title={theater?'退出窗口全屏（T）':'窗口全屏（T）'} aria-pressed={theater} onClick={toggleTheater}><Monitor size={20}/></button>
           <button className="icon-button" title={fullscreen?'退出全屏（F）':'全屏（F）'} aria-pressed={fullscreen} onClick={()=>void toggleFullscreen()}>{fullscreen?<Minimize size={20}/>:<Maximize size={20}/>}</button>
         </div>
       </div>
+      {drawer && <aside className="player-drawer" aria-label="选集与季" onMouseMove={hide}>
+        <header><div><strong>选集</strong><small>{detail.series.title}</small></div><button className="icon-button" aria-label="关闭选集" onClick={closeDrawer}><X size={18}/></button></header>
+        <div className="player-drawer-meta"><span>共 {detail.episodes.length} 集 · 第 {episode} 集</span><label className="autoplay-switch"><input type="checkbox" checked={settings.autoplay} onChange={e=>onSettings({autoplay:e.target.checked})}/> 自动连播</label></div>
+        <div className="player-drawer-body" ref={drawerBody}>
+          <SeasonOverview series={detail.series} action="play" pendingId={pickingSeason} disabled={!current()} onSelect={series=>void selectSeason(series)}/>
+          <EpisodeGrid episodes={detail.episodes} episode={episode} onSelect={selectEpisode}/>
+        </div>
+      </aside>}
       <dialog ref={shortcutDialog} className="player-shortcut-dialog" aria-labelledby="player-shortcut-title">
         <header><h2 id="player-shortcut-title">播放快捷键</h2><button className="icon-button" type="button" aria-label="关闭播放快捷键" onClick={() => shortcutDialog.current?.close()}><X size={20}/></button></header>
         <PlayerShortcutGuide/>
@@ -438,10 +461,6 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
       </div>{comments&&<Comments key={accountKey} seriesId={detail.series.id} episode={episode} onClose={()=>setComments(false)}/>}</div>
 
     {seasonInfo.source===detail.series.id&&seasonInfo.phase!=='idle'&&<aside className="next-season-card" data-season-status={seasonInfo.phase} aria-live="polite"><div><small>{seasonInfo.destination?.detail?`第 ${seasonInfo.destination.result.nextSeason} 季 · 共 ${seasonInfo.destination.detail.series.totalEpisodes||seasonInfo.destination.detail.episodes.length} 集`:'下一季'}</small><strong>{seasonInfo.destination?.detail?.series.title||(seasonInfo.phase==='ambiguous'?'季关联暂不明确':seasonInfo.phase==='none'?'暂无已确认的下一季':'正在查找下一季')}</strong><span>{seasonInfo.error||(seasonInfo.phase==='ready'?'首集已准备好，季末自动衔接':seasonInfo.phase==='identified'?'已确认下一季，季末预热首集':seasonInfo.phase==='preparing'?'正在准备下一季首集':seasonInfo.phase==='looking'?'正在确认官方季关联':seasonInfo.phase==='ambiguous'?'存在多个候选，已暂停自动跨季':'本季结束后将停止播放')}</span></div>{['looking','preparing'].includes(seasonInfo.phase)&&<LoaderCircle className="spin" size={18}/>}<div className="next-season-actions">{seasonInfo.phase==='error'&&<button className="btn" onClick={retrySeason}>重试下一季</button>}{seasonInfo.destination?.detail&&atSeasonEnd&&<button className="btn primary" disabled={continuing} onClick={()=>void continueSeason(false)}>{continuing?'正在衔接':'播放下一季'}</button>}</div></aside>}
-    <div className="episode-heading"><div><h3>选集</h3><span>{episodeMeta?.title||`第 ${episode} 集`}</span></div><div className="episode-actions"><label className="autoplay-switch"><input type="checkbox" checked={settings.autoplay} onChange={e=>onSettings({autoplay:e.target.checked})}/> 自动连播</label><button className="icon-button" aria-label="上一集" disabled={previousEpisode===undefined||continuing} onClick={()=>{if(previousEpisode!==undefined)void selectEpisode(previousEpisode);}}><ChevronLeft size={20}/></button><button className="icon-button" aria-label={atSeasonEnd?'下一季':'下一集'} disabled={!canAdvance||continuing} onClick={advance}><ChevronRight size={20}/></button></div></div>
-    <EpisodeGrid episodes={detail.episodes} episode={episode} onSelect={selectEpisode}/>
-    <SeasonOverview series={detail.series} action="play" pendingId={pickingSeason} disabled={!current()} onSelect={series=>void selectSeason(series)}/>
-    <p className="player-description">{detail.series.intro}</p>
   </div>;
 }
 const EpisodeGrid=memo(function EpisodeGrid({episodes,episode,onSelect}:{episodes:Episode[];episode:number;onSelect:(episode:number)=>void|Promise<void>}){
