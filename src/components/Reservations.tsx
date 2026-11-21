@@ -108,42 +108,45 @@ export default function Reservations({ loggedIn, uid, notify, onOpen, onLogin }:
     </article>;
   };
 
-  const row = (item: ReservationItem) => {
+  const mineCard = (item: ReservationItem) => {
     const id = target(item);
-    return <div className="reserve-row" key={`${item.id}:${id}`}>
-      <Poster cover={item.cover} title={item.title} className="reserve-thumb"/>
-      <div className="reserve-row-copy">
-        <strong title={item.title}>{item.title}</strong>
-        <small>{publishLabel(item)}{item.reserveText ? ` · ${item.reserveText}` : ''}{item.episodeCount ? ` · ${item.episodeCount} 集` : ''}{item.source === 'local' ? ' · 本机记录' : ''}</small>
+    return <article className={`reserve-card ${item.online ? 'launched' : ''}`} key={`${item.id}:${id}`}>
+      <div className="reserve-art">
+        <Poster cover={item.cover} title={item.title} className="reserve-poster"/>
+        <span className="reserve-when">{publishLabel(item)}</span>
       </div>
-      <div className="reserve-row-actions">{item.online && item.seriesId &&
-        <button className="btn subtle" onClick={() => onOpen(seriesOf(item))}>查看详情<ArrowRight size={15}/></button>}
-        {!item.online && id && <button className="btn secondary" disabled={busy === id} onClick={() => void toggle(item, false)}>
-          {busy === id ? <LoaderCircle className="spin" size={15}/> : null}取消预约</button>}
+      <strong className="reserve-title" title={item.title}>{item.title}</strong>
+      <p className="reserve-meta">{item.episodeCount ? `${item.episodeCount} 集` : ''}{item.source === 'local' ? ' · 本机记录' : ''}</p>
+      <div className="reserve-actions">{item.online
+        ? item.seriesId ? <button className="btn secondary" onClick={() => onOpen(seriesOf(item))}>查看详情<ArrowRight size={15}/></button>
+          : <span className="reserve-hint">已上线</span>
+        : id ? <button className="btn secondary" disabled={busy === id} onClick={() => void toggle(item, false)}>
+            {busy === id ? <LoaderCircle className="spin" size={15}/> : null}取消预约</button> : null}
       </div>
-    </div>;
+    </article>;
   };
 
-  const historyRow = (entry: ReservationHistoryEntry) => {
+  const recordCard = (entry: ReservationHistoryEntry) => {
     const state = historyState(entry, Math.floor(Date.now() / 1000));
-    const when = entry.cancelledAt > 0 ? ` · 取消于 ${stampLabel(entry.cancelledAt)}`
-      : entry.publishAt > 0 ? state === 'launched' ? ` · ${stampLabel(entry.publishAt)}上线` : ` · 预计 ${stampLabel(entry.publishAt)}上线` : '';
-    return <div className="reserve-row" key={`history:${entry.id}`}>
-      <Poster cover={entry.cover} title={entry.title} className="reserve-thumb"/>
-      <div className="reserve-row-copy">
-        <strong title={entry.title}>{entry.title}</strong>
-        <small><span className={`reserve-state ${state}`}>{historyLabels[state]}</span>
-          {entry.reservedAt > 0 ? ` 预约于 ${stampLabel(entry.reservedAt)}` : ' 本机未记录预约时间'}{when}{entry.episodeCount ? ` · ${entry.episodeCount} 集` : ''}</small>
+    const when = entry.cancelledAt > 0 ? `取消于 ${stampLabel(entry.cancelledAt)}`
+      : entry.publishAt > 0 ? (state === 'launched' ? `${stampLabel(entry.publishAt)}上线` : `预计 ${stampLabel(entry.publishAt)}上线`) : '';
+    const reserved = entry.reservedAt > 0 ? `预约于 ${stampLabel(entry.reservedAt)}` : '';
+    return <article className={`reserve-card record ${state}`} key={`history:${entry.id}`}>
+      <div className="reserve-art">
+        <Poster cover={entry.cover} title={entry.title} className="reserve-poster"/>
+        <span className={`reserve-when state-${state}`}>{historyLabels[state]}</span>
       </div>
-      {entry.seriesId && <div className="reserve-row-actions">
-        <button className="btn subtle" onClick={() => onOpen(seriesOfHistory(entry))}>查看详情<ArrowRight size={15}/></button>
-      </div>}
-    </div>;
+      <strong className="reserve-title" title={entry.title}>{entry.title}</strong>
+      <p className="reserve-meta">{[reserved, when].filter(Boolean).join(' · ') || (entry.episodeCount ? `${entry.episodeCount} 集` : '红果短剧')}</p>
+      <div className="reserve-actions">{entry.seriesId &&
+        <button className="btn secondary" onClick={() => onOpen(seriesOfHistory(entry))}>查看详情<ArrowRight size={15}/></button>}
+      </div>
+    </article>;
   };
 
-  const section = (title: string, rows: ReservationItem[], empty: string) => <section className="reserve-section">
-    <div className="section-heading"><h2>{title}</h2><span>{rows.length} 部作品</span></div>
-    {rows.length ? <div className="reserve-rows">{rows.map(row)}</div> : <p className="reserve-empty">{empty}</p>}
+  const section = (title: string, items: ReservationItem[], empty: string) => <section className="reserve-section">
+    <div className="section-heading"><h2>{title}</h2><span>{items.length} 部作品</span></div>
+    {items.length ? <div className="reserve-grid">{items.map(mineCard)}</div> : <p className="reserve-empty">{empty}</p>}
   </section>;
 
   return <div className="reservations-page library-page">
@@ -187,8 +190,8 @@ export default function Reservations({ loggedIn, uid, notify, onOpen, onLogin }:
         {section('已上线', mine?.online || [], '预约过的剧上线后会出现在这里；上游不再返回时，本机记录也会保留。')}
         {!!mine?.history.length && <section className="reserve-section">
           <div className="section-heading"><h2>预约记录</h2><span>{mine.history.length} 条 · 本机保存</span></div>
-          <div className="reserve-rows">{(allHistory ? mine.history : mine.history.slice(0, 8)).map(historyRow)}</div>
-          {!allHistory && mine.history.length > 8 && <div className="load-more">
+          <div className="reserve-grid">{(allHistory ? mine.history : mine.history.slice(0, 10)).map(recordCard)}</div>
+          {!allHistory && mine.history.length > 10 && <div className="load-more">
             <button className="btn secondary" onClick={() => setAllHistory(true)}>显示全部记录<ArrowRight size={16}/></button></div>}
         </section>}
       </>}
