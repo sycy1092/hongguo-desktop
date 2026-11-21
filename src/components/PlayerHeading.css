@@ -1,0 +1,12 @@
+/* 播放页标题行：简介放到标题右侧，页面不再需要向下滚动。 */
+.player-page{padding-bottom:0}
+.app-topnav .playback-page:has(.player-page){padding-bottom:4px}
+.player-heading{gap:16px}
+.player-heading>.player-heading-title{flex:0 1 auto;min-width:0;max-width:42%;position:relative}
+/* 切集提示占用标题下方的留白，不撑高标题行，避免播放中途闪现滚动条。 */
+.player-heading-title .switch-status{position:absolute;top:100%;left:0;margin-top:2px;white-space:nowrap;max-width:min(420px,60vw);overflow:hidden;text-overflow:ellipsis}
+.player-heading-title h2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.player-heading-intro{flex:1;min-width:0;margin:0;color:var(--muted);font-size:12px;line-height:1.75;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.player-heading-favorite{margin-left:2px}
+@media(max-width:1200px){.player-heading>.player-heading-title{max-width:46%}.player-heading-intro{-webkit-line-clamp:1}}
+@media(max-width:900px){.player-heading-intro{display:none}.player-heading>.player-heading-title{max-width:none;flex:1}}

@@ -384,6 +384,7 @@ kbd { font:inherit; }
 .drawer-shortcuts small { display:block; font-size:10px; color:var(--muted); margin-top:6px; }
 .drawer-shortcuts>button>svg:last-child { display:none; }
 .drawer-shortcuts>button:hover { background:var(--surface-hover); }
+.drawer-shortcuts>button.drawer-wide { grid-column:1 / -1; }
 .drawer-section-title { display:flex; justify-content:space-between; align-items:center; margin:29px 0 15px; }
 .drawer-section-title h3 { font-size:15px; font-weight:500; }
 .drawer-section-title>button { display:flex; align-items:center; gap:4px; font-size:10px; background:none; color:var(--muted); padding:0; }

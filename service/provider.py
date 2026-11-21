@@ -26,6 +26,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 import danmaku as danmaku_contract
+import reservations as reservation_contract
 from favorite_sync import set_favorite as reconcile_favorite
 from progress_contract import build_playback_progress_item, build_progress_item, epoch_seconds, mobile_position_seconds
 from source_download import SourceDownloader
@@ -39,6 +40,8 @@ GENRES = {"short_play", "comic_series", "ai_series"}
 QUALITIES = {"auto", "1080p", "720p", "540p", "480p", "360p"}
 SORTS = {"online_time", "hot_score", "hot_collect"}
 CODECS = {"bytevc1", "hevc", "h265", "hvc1", "avc1", "h264"}
+# Distinguishes "the reservation list could not be read" from "the reservation is not in it".
+_UNREADABLE = object()
 
 
 # Fixed protocol salt for the official playback URL envelope; no account material.
@@ -1154,6 +1157,332 @@ class Provider:
             result = self._read("同步收藏", reconcile)
             self.cache.clear()
         return {"synced": True, "favorite": bool(favorite)}
+
+    # 上线预约：公开日历不需要登录；已预约与预约开关走账号接口，写入后必须回读核对。
+
+    def reservation_calendar(self, date="", cursor=""):
+        offset = 0
+        if cursor:
+            if not re.fullmatch(r"[0-9]{1,4}", str(cursor)):
+                raise ProviderError("INPUT_INVALID", "预约分页参数不正确", 400)
+            offset = int(cursor)
+        try:
+            date = reservation_contract.valid_date(date) if date else ""
+        except reservation_contract.ReservationError:
+            raise ProviderError("INPUT_INVALID", "预约日期不正确", 400) from None
+
+        def read():
+            try:
+                raw = self.sdk.api("GET", reservation_contract.CALENDAR_PATH,
+                                   extra_query=reservation_contract.calendar_fields(date, offset), signed=True)
+                page = reservation_contract.parse_calendar(raw, date, offset)
+            except (reservation_contract.ReservationError, AttributeError, TypeError):
+                raise ProviderError("RESERVATIONS_UNAVAILABLE", "预约日历暂时无法读取，请稍后重试") from None
+            return {**page, "cursor": str(page["nextOffset"]) if page["hasMore"] else ""}
+
+        return self.cache.get(("reservation-calendar", date, offset), 120,
+                              lambda: self._read("读取预约日历", read))
+
+    @staticmethod
+    def _reservation_row(raw):
+        if not isinstance(raw, dict) or not isinstance(raw.get("title"), str) or not raw["title"].strip():
+            return None
+        return {"id": str(raw.get("id") or ""), "seriesId": str(raw.get("seriesId") or ""),
+                "reservationId": str(raw.get("reservationId") or ""), "title": raw["title"][:200],
+                "cover": str(raw.get("cover") or "")[:8192], "intro": str(raw.get("intro") or "")[:4000],
+                "episodeCount": number(raw.get("episodeCount")), "publishAt": number(raw.get("publishAt")),
+                "note": str(raw.get("note") or "")[:200], "reserveText": str(raw.get("reserveText") or "")[:200],
+                "online": raw.get("online") is True, "source": "local" if raw.get("source") == "local" else "remote"}
+
+    def _reservation_path(self):
+        return self.data_dir / "reservations.json"
+
+    def _reservation_accounts(self):
+        try:
+            saved = json.loads(self._reservation_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(saved, dict) or saved.get("schema") != 1 or not isinstance(saved.get("accounts"), dict):
+            return {}
+        return {key: entry for key, entry in saved["accounts"].items() if isinstance(entry, dict)}
+
+    def _reservation_save(self, uid, accounts):
+        if not uid:
+            return
+        cutoff = time.time() - 7 * 86400
+        accounts = {key: entry for key, entry in accounts.items()
+                    if key == uid or number(entry.get("at")) >= cutoff}
+        while len(accounts) > 6:
+            accounts.pop(next(iter(accounts)))
+        try:
+            temporary = self._reservation_path().with_suffix(".tmp")
+            temporary.write_text(json.dumps({"schema": 1, "accounts": accounts}, ensure_ascii=False), encoding="utf-8")
+            temporary.replace(self._reservation_path())
+        except OSError:
+            pass
+
+    def _reservation_cache(self, uid):
+        """Last list this account actually read, so offline use still shows it."""
+        account = self._reservation_accounts().get(uid)
+        if not isinstance(account, dict):
+            return None
+        rows = lambda values: [row for row in (self._reservation_row(value)
+                                               for value in (values if isinstance(values, list) else [])) if row]
+        cached = {"upcoming": rows(account.get("upcoming"))[:200], "online": rows(account.get("online"))[:200],
+                  "history": self._reservation_ledger(uid), "updatedAt": number(account.get("at")), "stale": True}
+        return cached if cached["upcoming"] or cached["online"] or cached["history"] else None
+
+    def _reservation_store(self, uid, value):
+        accounts = self._reservation_accounts()
+        account = dict(accounts.get(uid) or {})
+        account.update({"at": int(time.time()), "upcoming": value["upcoming"][:200],
+                        "online": value["online"][:200]})
+        accounts[uid] = account
+        self._reservation_save(uid, accounts)
+
+    @staticmethod
+    def _reservation_entry(raw):
+        if not isinstance(raw, dict) or not isinstance(raw.get("title"), str) or not raw["title"].strip():
+            return None
+        key = str(raw.get("itemId") or raw.get("id") or "")
+        if not re.fullmatch(r"[0-9]{8,24}", key):
+            return None
+        return {"id": key, "itemId": str(raw.get("itemId") or ""), "seriesId": str(raw.get("seriesId") or ""),
+                "title": raw["title"][:200], "cover": str(raw.get("cover") or "")[:8192],
+                "episodeCount": number(raw.get("episodeCount")), "publishAt": number(raw.get("publishAt")),
+                "reservedAt": number(raw.get("reservedAt")), "cancelledAt": number(raw.get("cancelledAt")),
+                "online": raw.get("online") is True, "seenAt": number(raw.get("seenAt"))}
+
+    def _reservation_ledger(self, uid):
+        """This account's own reservation history; upstream lists may forget launched ones."""
+        account = self._reservation_accounts().get(uid) or {}
+        entries = [entry for entry in (self._reservation_entry(value)
+                                       for value in (account.get("history") or [])) if entry]
+        entries.sort(key=lambda entry: max(entry["reservedAt"], entry["cancelledAt"]), reverse=True)
+        return entries[:100]
+
+    @staticmethod
+    def _reservation_touch(entry, item, now):
+        changed = False
+        for key, value in (("title", item.get("title")), ("cover", item.get("cover")),
+                           ("seriesId", item.get("seriesId")), ("episodeCount", number(item.get("episodeCount"))),
+                           ("publishAt", number(item.get("publishAt")))):
+            if value and entry.get(key) != value:
+                entry[key] = value
+                changed = True
+        online = item.get("online") is True
+        if entry.get("online") != online:
+            entry["online"] = online
+            changed = True
+        if now and entry.get("seenAt") != now:
+            entry["seenAt"] = now
+            changed = True
+        return changed
+
+    def _reservation_observe(self, uid, items, now=None, reserved_at=None):
+        """Record what the account list shows. `reserved_at` is only set for our own
+        confirmed action, so an older reservation never claims a made-up time."""
+        if not uid or not items:
+            return
+        now = int(now or time.time())
+        accounts = self._reservation_accounts()
+        account = dict(accounts.get(uid) or {})
+        ledger = {}
+        for value in account.get("history") or []:
+            entry = self._reservation_entry(value)
+            if entry:
+                ledger[entry["id"]] = entry
+        changed = False
+        for item in items:
+            key = item.get("reservationId") or item.get("seriesId")
+            if not key:
+                continue
+            entry = ledger.get(key)
+            if entry is None:
+                # A launched row may lose the reservation id upstream. Fill the series
+                # id into the matching pre-launch record instead of storing it twice;
+                # the match needs the exact title and episode count, never a similar name.
+                twin = next((row for row in ledger.values()
+                             if not row["seriesId"] and row["title"] == item.get("title")
+                             and row["episodeCount"] == number(item.get("episodeCount"))), None)
+                if twin is not None:
+                    twin["seriesId"] = item.get("seriesId") or twin["seriesId"]
+                    if self._reservation_touch(twin, item, now):
+                        changed = True
+                    continue
+                ledger[key] = {"id": key, "itemId": item.get("reservationId") or "",
+                               "seriesId": item.get("seriesId") or "", "title": item.get("title") or "",
+                               "cover": item.get("cover") or "", "episodeCount": number(item.get("episodeCount")),
+                               "publishAt": number(item.get("publishAt")),
+                               "reservedAt": number(reserved_at), "cancelledAt": 0,
+                               "online": item.get("online") is True, "seenAt": now}
+                changed = True
+            elif self._reservation_touch(entry, item, now):
+                changed = True
+        if not changed:
+            return
+        account["history"] = sorted(ledger.values(),
+                                    key=lambda entry: max(entry["reservedAt"], entry["cancelledAt"]),
+                                    reverse=True)[:100]
+        accounts[uid] = account
+        self._reservation_save(uid, accounts)
+
+    def _reservation_cancel(self, uid, item_id, now=None):
+        if not uid:
+            return
+        accounts = self._reservation_accounts()
+        account = dict(accounts.get(uid) or {})
+        entries, changed = [], False
+        for value in account.get("history") or []:
+            entry = self._reservation_entry(value)
+            if not entry:
+                continue
+            if entry["id"] == item_id and not entry["cancelledAt"]:
+                entry["cancelledAt"] = int(now or time.time())
+                changed = True
+            entries.append(entry)
+        if not changed:
+            return
+        entries.sort(key=lambda entry: max(entry["reservedAt"], entry["cancelledAt"]), reverse=True)
+        account["history"] = entries[:100]
+        accounts[uid] = account
+        self._reservation_save(uid, accounts)
+
+    @staticmethod
+    def _launched(entry, now):
+        """Upstream said launched, or its scheduled time passed before we last saw it.
+
+        A delayed release upstream still lists as 待上线 is not flipped by the clock.
+        """
+        if entry["cancelledAt"]:
+            return False
+        if entry["online"]:
+            return True
+        return bool(entry["publishAt"]) and entry["publishAt"] <= now and entry["seenAt"] < entry["publishAt"]
+
+    def _reservation_launched(self, uid, online, now):
+        """Upstream 已上线 plus local records that already launched."""
+        series = {item["seriesId"] for item in online if item["seriesId"]}
+        pairs = {(item["title"], item["episodeCount"]) for item in online}
+        extra = []
+        for entry in self._reservation_ledger(uid):
+            if not self._launched(entry, now):
+                continue
+            if entry["seriesId"] and entry["seriesId"] in series:
+                continue
+            # Only an identical series id, or an identical title and episode count,
+            # is treated as the same record upstream; similar names never are.
+            if (entry["title"], entry["episodeCount"]) in pairs:
+                continue
+            extra.append({"id": entry["seriesId"] or entry["id"], "seriesId": entry["seriesId"],
+                          "reservationId": entry["itemId"], "title": entry["title"], "cover": entry["cover"],
+                          "intro": "", "episodeCount": entry["episodeCount"], "publishAt": entry["publishAt"],
+                          "note": "", "reserveText": "", "online": True, "source": "local"})
+        return online + extra
+
+    def _reservation_partition(self, session, online):
+        items, seen, offset, pages = [], set(), 0, 0
+        while pages < reservation_contract.MAX_PAGES:
+            response = self.account._json(self.account._call(
+                "GET", reservation_contract.CALENDAR_PATH,
+                extra=reservation_contract.list_fields(online, offset), session=session))
+            if self.account._account_changed(session):
+                raise ProviderError("ACCOUNT_CHANGED", "账号已切换，请重新同步", 409)
+            try:
+                page = reservation_contract.parse_list(response, online, offset)
+            except reservation_contract.ReservationError:
+                raise ProviderError("RESERVATIONS_UNAVAILABLE", "云端预约列表暂时无法读取，请稍后重试") from None
+            for item in page["items"]:
+                if item["id"] and item["id"] not in seen:
+                    seen.add(item["id"])
+                    items.append(item)
+            pages += 1
+            if not page["hasMore"]:
+                break
+            offset = page["nextOffset"]
+        return items[:200]
+
+    def reservations(self, refresh=False):
+        session = self._require_login()
+        uid = str(session.get("uid") or "")
+        credentials = dict(self.account.load_session() or {})
+        if refresh:
+            self.cache.invalidate(("reservations", uid))
+
+        def read():
+            upcoming = self._reservation_partition(credentials, False)
+            online = self._reservation_partition(credentials, True)
+            now = int(time.time())
+            self._reservation_observe(uid, [*upcoming, *online], now)
+            value = {"upcoming": upcoming, "online": self._reservation_launched(uid, online, now),
+                     "history": self._reservation_ledger(uid), "updatedAt": now, "stale": False}
+            self._reservation_store(uid, value)
+            return value
+
+        try:
+            return self.cache.get(("reservations", uid), 15, lambda: self._read("读取预约", read))
+        except ProviderError as error:
+            if error.code in {"LOGIN_REQUIRED", "ACCOUNT_CHANGED", "SERVICE_STOPPING"}:
+                raise
+            cached = self._reservation_cache(uid)
+            if cached is None:
+                raise
+            return {**cached, "warning": "显示上次读取的预约列表"}
+
+    def _reservation_lookup(self, session, reservation_id):
+        """The account's own row for one reservation; None when absent, _UNREADABLE when unreadable."""
+        try:
+            for online in (False, True):
+                offset, pages = 0, 0
+                while pages < reservation_contract.MAX_PAGES:
+                    response = self.account._json(self.account._call(
+                        "GET", reservation_contract.CALENDAR_PATH,
+                        extra=reservation_contract.list_fields(online, offset), session=session))
+                    page = reservation_contract.parse_list(response, online, offset)
+                    for item in page["items"]:
+                        if item["reservationId"] == reservation_id:
+                            return item
+                    pages += 1
+                    if not page["hasMore"]:
+                        break
+                    offset = page["nextOffset"]
+        except Exception:
+            return _UNREADABLE
+        return None
+
+    def reserve(self, item_id, reserved, expected_uid=None):
+        if type(reserved) is not bool:
+            raise ProviderError("INPUT_INVALID", "预约状态不正确", 400)
+        try:
+            body = reservation_contract.change_body(item_id, reserved)
+        except reservation_contract.ReservationError:
+            raise ProviderError("INPUT_INVALID", "预约对象不正确", 400) from None
+        self._expect_uid(expected_uid)
+        with self._write_lock:
+            session = dict(self.account.load_session() or {})
+            self._expect_uid(expected_uid)
+            response = self._read("提交预约", lambda: self.account._json(self.account._call(
+                "POST", reservation_contract.CHANGE_PATH, body=body, session=session)))
+            self._expect_uid(expected_uid)
+            if not isinstance(response, dict) or str(response.get("code")) != "0":
+                raise ProviderError("RESERVATION_REJECTED", "红果没有接受这次预约操作，预约状态没有改变")
+            found = self._reservation_lookup(session, body["item_id"])
+            if found is not _UNREADABLE and (found is not None) != reserved:
+                time.sleep(.6)
+                found = self._reservation_lookup(session, body["item_id"])
+            self.cache.clear()
+            if found is _UNREADABLE:
+                return {"synced": False, "reserved": reserved, "pending": True,
+                        "message": "预约已经提交，但预约列表暂时无法核对，稍后刷新看看"}
+            if (found is not None) != reserved:
+                return {"synced": False, "reserved": reserved, "pending": True,
+                        "message": "红果尚未确认这次预约，稍后刷新预约列表核对"}
+            uid = str(self.session().get("uid") or "")
+            if reserved and found is not None:
+                self._reservation_observe(uid, [found], reserved_at=int(time.time()))
+            elif not reserved:
+                self._reservation_cancel(uid, body["item_id"])
+            return {"synced": True, "reserved": reserved, "pending": False}
 
     def _cancel(self, cancelled):
         if self._closed.is_set() or (cancelled and cancelled()):

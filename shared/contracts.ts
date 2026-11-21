@@ -13,6 +13,40 @@ export interface Session { loggedIn: boolean; uid: string; nickname: string; ava
 export interface QrLoginState {id:string;status:'waiting'|'scanned'|'verifying'|'confirmed'|'expired'|'cancelled'|'failed';expiresAt:number;pollAfter:number;message:string;imageDataUrl?:string;session?:Session;error?:{code:string;message:string};}
 export interface Comment { id: string; text: string; nickname: string; avatar: string; likes: number; time: string; }
 export interface CommentsPage { items: Comment[]; total: number; cursor: string | number; hasMore: boolean; }
+/** One series on the 上线日历 or in the account's own 预约 list. */
+export interface ReservationItem {
+  id: string;
+  seriesId: string;
+  reservationId: string;
+  title: string;
+  cover: string;
+  intro: string;
+  episodeCount: number;
+  publishAt: number;
+  note: string;
+  reserveText: string;
+  online: boolean;
+  /** 'local' when the reservation was kept only in this client's own record. */
+  source?: 'local' | 'remote';
+}
+export interface ReservationCalendar { today: string; date: string; dates: string[]; items: ReservationItem[]; hasMore: boolean; cursor: string; }
+/** One reservation this account made; kept locally so launched ones stay visible. */
+export interface ReservationHistoryEntry {
+  id: string;
+  itemId: string;
+  seriesId: string;
+  title: string;
+  cover: string;
+  episodeCount: number;
+  publishAt: number;
+  reservedAt: number;
+  cancelledAt: number;
+  /** Last state the account list reported, and when that was observed. */
+  online: boolean;
+  seenAt: number;
+}
+export interface ReservationList { upcoming: ReservationItem[]; online: ReservationItem[]; history: ReservationHistoryEntry[]; updatedAt: number; stale: boolean; warning?: string; }
+export interface ReservationChange { synced: boolean; reserved: boolean; pending: boolean; message?: string; }
 export interface DanmakuItem { id: string; text: string; time: number; }
 export interface DanmakuPage { items: DanmakuItem[]; start: number; end: number; hasMore: boolean; seriesId: string; vid: string; source: 'mobile'; }
 export interface MediaSession { id: string; url: string; phase: 'preparing' | 'ready' | 'complete' | 'error' | 'cancelled'; error?: string; cached?: boolean; quality?: string; duration?: number; delivery?: 'remux' | 'transcode'; videoCodec?: string; }
