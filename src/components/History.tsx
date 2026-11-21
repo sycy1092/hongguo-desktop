@@ -69,9 +69,16 @@ export default function History({ onOpen, onRemove, onSync, syncing, revision, n
       {windowStart>0&&<div className="history-window-note"><span>正在浏览较早的记录</span><button className="btn subtle" onClick={()=>{loadedCount.current=50;setItems([]);setWindowStart(0);setRetry(value=>value+1);}}>回到最近记录<ArrowRight size={14}/></button></div>}
       <div className="history-groups">{groupHistory(items.slice(windowStart,windowStart+300)).map(group=><section className="history-day" key={group.key}><h2><Clock3 size={15}/>{group.label}<span>{group.items.length} 部</span></h2><div className="history-list">{group.items.map(item=>{
         const finished=isHistoryFinished(item),complete=episodeFinished(item);
+        const percent=item.duration>0?Math.min(100,Math.round(item.position/item.duration*100)):0;
         return <article className="history-card" key={item.series.id}>
-          <button className="history-poster" onClick={()=>onOpen(item.series,true,item)} aria-label={(finished?'重新观看 ':complete?'查看并播放下一集 ':'继续观看 ')+item.series.title}><Poster cover={item.series.cover} title={item.series.title}/><span><Play size={20} fill="currentColor"/></span></button>
-          <div className="history-info"><button className="history-title" onClick={()=>onOpen(item.series,false,item)}>{item.series.title}</button><p>{finished?<span className="history-complete"><CheckCheck size={13}/>已看完全集</span>:<>第 {item.episode} 集{item.series.totalEpisodes>0?' / 共 '+item.series.totalEpisodes+' 集':''}<span className="history-position"> · {complete?'本集已看完':item.position>0?'看到 '+positionLabel(item.position):'播放位置待继续'}</span></>}</p>{item.duration>0&&<div className="history-progress" aria-label={'本集观看进度 '+Math.min(100,Math.round(item.position/item.duration*100))+'%'}><span style={{width:Math.min(100,item.position/item.duration*100)+'%'}}/></div>}</div>
+          <button className="history-poster" onClick={()=>onOpen(item.series,true,item)} aria-label={(finished?'重新观看 ':complete?'查看并播放下一集 ':'继续观看 ')+item.series.title}>
+            <Poster cover={item.series.cover} title={item.series.title}/>
+            {item.duration>0&&!finished&&<em className="history-progress" aria-label={'本集观看进度 '+percent+'%'}><i style={{width:percent+'%'}}/></em>}
+            <em className="history-ep">{finished?'已看完':`第 ${item.episode} 集`}</em>
+            <span className="history-play"><Play size={22} fill="currentColor"/></span>
+          </button>
+          <button className="history-title" onClick={()=>onOpen(item.series,false,item)} title={item.series.title}>{item.series.title}</button>
+          <p className="history-meta">{finished?<span className="history-complete"><CheckCheck size={13}/>已看完全集</span>:<>第 {item.episode} 集{complete?' · 本集已看完':item.position>0?' · 看到 '+positionLabel(item.position):''}{item.series.totalEpisodes>0?' · 共 '+item.series.totalEpisodes+' 集':''}</>}</p>
           <div className="history-actions"><button className="btn secondary" onClick={()=>onOpen(item.series,true,item)}><Play size={15} fill="currentColor"/>{finished?'重新观看':complete?'观看下一集':'继续观看'}</button><button className="icon-button muted" title="只移除本机记录，手机记录不受影响" aria-label={'移除 '+item.series.title+' 的本地记录'} disabled={!!removing} onClick={()=>void remove(item.series.id)}>{removing===item.series.id?<LoaderCircle size={17} className="spin"/>:<Trash2 size={17}/>}</button></div>
         </article>;
       })}</div></section>)}</div>
