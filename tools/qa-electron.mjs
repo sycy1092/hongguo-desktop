@@ -39,7 +39,7 @@ try{
   if(await instance.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().some(window=>window.isVisible())))throw new Error('关闭后窗口未收入托盘');
   pass('关闭到托盘暂停');
   await instance.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].show());
-  await page.getByRole('button',{name:'返回',exact:true}).click();
+  await page.mouse.move(600,400);await page.getByLabel('退出播放').click();
   await page.getByRole('button',{name:'我的片库',exact:true}).click();await page.getByRole('dialog',{name:'我的片库'}).getByRole('button',{name:'观看历史',exact:true}).first().click();await page.waitForTimeout(500);const entries=await page.locator('.history-card').count();if(!entries)throw new Error('观看记录未保存');pass('本地观看记录',{entries});
   await instance.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setSize(960,740));await page.waitForTimeout(300);if(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth))throw new Error('窄窗口横向溢出');await page.screenshot({path:path.join(out,'window-960.png')});pass('窄窗口布局');
   pass('运行时错误',{errors});

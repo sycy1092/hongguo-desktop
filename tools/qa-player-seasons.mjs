@@ -154,7 +154,7 @@ try{
    if(action==='hide')await page.evaluate(()=>window.__qa.hide());
    if(action==='account')await page.evaluate(()=>window.__qa.changeAccount('replacement-fixture-account'));
    if(action==='inactive')await page.evaluate(()=>window.__qa.setActive(false));
-   if(action==='close')await page.getByRole('button',{name:'返回',exact:true}).click();
+   if(action==='close'){await page.mouse.move(600,400);await page.getByLabel('退出播放').click();}
    await page.waitForTimeout(150);await release(second,phase);await page.waitForTimeout(800);
    const observed=await state(),events=await page.evaluate(()=>window.__qa.seriesEvents);
    check(phase+' 迟到响应在 '+action+' 后不会切季',events.length===0&&(action==='close'?await page.locator('.player-page').count()===0:observed.sid===first),{...observed,events});

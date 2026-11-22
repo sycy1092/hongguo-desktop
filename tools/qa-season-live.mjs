@@ -22,7 +22,7 @@ try{
  await page.getByLabel('全部季概览').getByRole('button',{name:/查看第 2 季/}).click();await expect.poll(()=>page.locator('.detail-hero h2').textContent(),{timeout:60000}).toContain('第二季');
  await page.getByRole('dialog').getByRole('button',{name:'播放第 4 集',exact:true}).click();await expect.poll(()=>decoded(second),{timeout:180000,intervals:[100,300]}).toBe(true);
  const fourth=await page.locator('video[data-active=true]').evaluate(v=>({episode:v.dataset.episode,width:v.videoWidth,height:v.videoHeight,time:v.currentTime,rate:v.playbackRate}));check('第二季第四集真实画面解码且无ProviderError',fourth.episode==='4'&&fourth.width>0&&fourth.time>0,fourth);
- await page.getByRole('button',{name:'返回',exact:true}).click();await page.waitForFunction(()=>!document.querySelector('.player-page'));
+ await page.mouse.move(600,400);await page.getByLabel('退出播放').click();await page.waitForFunction(()=>!document.querySelector('.player-page'));
  await page.locator(`.series-card[data-series-id="${first}"]`).first().locator('.series-poster-button').click();await page.waitForSelector('.detail-hero');
  for(let n=0;n<8;n++){const more=page.getByRole('button',{name:/显示更多集数/});if(await more.count())await more.click();}
  await page.getByRole('dialog').getByRole('button',{name:'播放第 1000 集',exact:true}).click();await expect.poll(()=>decoded(first),{timeout:180000}).toBe(true);

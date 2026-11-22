@@ -257,7 +257,7 @@ try {
   await page.getByRole('button', { name: '上一集', exact: true }).click();
   await page.waitForFunction(() => { const video = document.querySelector('video[data-active=true]'); return video?.dataset.episode === '1' && video.videoWidth > 0; });
   check('上一集同样按可播放列表跳过缺号', true);
-  await page.getByRole('button', { name: '返回', exact: true }).click();
+  await page.mouse.move(600,400);await page.getByLabel('退出播放').click();
   check('结束播放后恢复首页与顶部栏', !await page.locator('.player-page').count() && await page.locator('.app-header').isVisible());
   await page.locator('.header-settings').click();
   const settingsEntries = await page.locator('.player-shortcut-list').getByRole('listitem').allTextContents();

@@ -125,6 +125,9 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
     finally{favoritePending.current=false;if(mounted.current)setFavoriteBusy(false);}
   };
   const toggleTheater=useCallback(()=>{const scroll=playbackLayout.current?.closest('.content-scroll') as HTMLElement|null;const next=!theaterRef.current;if(next)theaterScroll.current=scroll?.scrollTop||0;theaterRef.current=next;setTheater(next);requestAnimationFrame(()=>{if(scroll)scroll.scrollTop=next?0:theaterScroll.current;});hide();},[hide]);
+  // 播放页默认就是窗口全屏；用户按 T / 点监视图标退出后不再自动进入。
+  const autoTheater=useRef(false);
+  useEffect(()=>{if(autoTheater.current)return;autoTheater.current=true;const frame=requestAnimationFrame(()=>{if(!theaterRef.current&&mounted.current)toggleTheater();});return()=>cancelAnimationFrame(frame);},[toggleTheater]);
   const applySound = (deck: VideoDeck) => { const s = latest.current.settings; deck.video.playbackRate = s.rate; deck.video.volume = s.volume; deck.video.muted = mutedRef.current; };
   const targetFor=(data:SeriesDetail,index:number,start=0):PlaybackTarget=>({seriesId:data.series.id,episode:index,quality:latest.current.settings.quality,start,compatible:compatible.current,duration:episodeDurations.current.get(`${data.series.id}:${index}`)||knownDuration(data.episodes.find(item=>item.index===index)?.duration)});
   const target = (index: number, start = 0): PlaybackTarget => targetFor(latest.current.detail,index,start);
@@ -322,7 +325,10 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
     if(revealControls)hide();
   },[hide,selectEpisode,cancelSeasonPick]);
   const seekBy = useCallback((amount: number) => { const deck=current();if(deck)seekTo(deck.video.currentTime+amount,false); }, [seekTo]);
-  const close = useCallback(() => { if (closed.current) return; closed.current = true; shouldPlay.current = false;continuation.current?.reset();seasonGeneration.current++;mediaPreload(window.hongguo).clear();switcher.current?.cancelPending(); void save(); current()?.video.pause(); if (document.fullscreenElement === playbackLayout.current) void document.exitFullscreen().catch(() => {}).finally(() => latest.current.onClose()); else latest.current.onClose(); }, [save]);
+  const close = useCallback(() => { if (closed.current) return; closed.current = true; shouldPlay.current = false;continuation.current?.reset();seasonGeneration.current++;mediaPreload(window.hongguo).clear();switcher.current?.cancelPending(); void save(); current()?.video.pause();
+  // 窗口全屏下页面被卷到顶部，关闭前把原来的滚动位置还回去，返回后不停在顶上。
+  const finish = () => { if (theaterRef.current) { const scroll = playbackLayout.current?.closest('.content-scroll') as HTMLElement | null; if (scroll) scroll.scrollTop = theaterScroll.current; } latest.current.onClose(); };
+  if (document.fullscreenElement === playbackLayout.current) void document.exitFullscreen().catch(() => {}).finally(finish); else finish(); }, [save]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (!latest.current.isActive || shortcutDialog.current?.open || event.defaultPrevented || event.isComposing) return;
@@ -414,7 +420,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
 
       <div className="window-drag-region" aria-hidden="true" />
       {!current()&&!error&&<div className="player-startup-cover" aria-hidden="true">{detail.series.cover&&<img src={detail.series.cover} alt=""/>}<div/></div>}
-      <div className="fullscreen-toolbar"><div><strong>{detail.series.title}</strong><span>第 {episode} 集</span></div><button className="icon-button" title={fullscreen?'退出全屏（Esc）':'退出窗口全屏（Esc）'} onClick={()=>{if(fullscreen)void toggleFullscreen();else toggleTheater();}}><Minimize size={20}/></button></div>
+      <div className="fullscreen-toolbar"><div><button className="icon-button toolbar-back" title="返回" aria-label="退出播放" onClick={close}><ArrowLeft size={19}/></button><strong>{detail.series.title}</strong><span>第 {episode} 集</span></div><button className="icon-button" title={fullscreen?'退出全屏（Esc）':'退出窗口全屏（Esc）'} onClick={()=>{if(fullscreen)void toggleFullscreen();else toggleTheater();}}><Minimize size={20}/></button></div>
       {[0,1].map(index=><video key={index} ref={element=>{videos.current[index]=element;}} className="decoder-video" data-active={active===index?'true':'false'} data-series-id={active===index?detail.series.id:undefined} data-episode={active===index?episode:undefined} playsInline
         onClick={()=>{if(current()?.index!==index)return;clearTimeout(clickTimer.current);clickTimer.current=setTimeout(toggle,220);}} onDoubleClick={()=>{if(current()?.index!==index)return;clearTimeout(clickTimer.current);void toggleFullscreen();}}
         onTimeUpdate={()=>onTime(index)} onDurationChange={()=>onTime(index)} onProgress={()=>onTime(index)} onPlaying={()=>{if(current()?.index!==index)return;setPlaying(true);setPhase('');if(automaticSwitch.current){automaticSwitch.current=false;setChrome(false);}else scheduleChromeHide();}}
