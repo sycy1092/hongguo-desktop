@@ -17,6 +17,7 @@ export class Supervisor {
   private generation = 0;
   private stopping = false;
   private logLines: string[] = [];
+  private serviceLogWrites: Promise<void> = Promise.resolve();
   private startupTimeoutMs: number;
   private shutdownTimeoutMs: number;
   private killTimeoutMs: number;
@@ -30,6 +31,20 @@ export class Supervisor {
   private log(event: string) {
     this.logLines.push(JSON.stringify({ at: new Date().toISOString(), event }));
     this.logLines = this.logLines.slice(-300);
+  }
+
+  /** 内容服务的 stderr 落盘，崩溃后才有据可查；只在本地数据目录，超过 512KB 轮换。 */
+  private appendServiceLog(chunk: Buffer | string) {
+    const text = String(chunk).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').slice(0, 4000);
+    if (!text.trim()) return;
+    const file = path.join(this.data, 'service.log');
+    this.serviceLogWrites = this.serviceLogWrites.then(async () => {
+      try {
+        const stat = await fs.stat(file).catch(() => undefined);
+        if (stat && stat.size > 512 * 1024) await fs.rename(file, file + '.1').catch(() => {});
+        await fs.appendFile(file, text, 'utf8');
+      } catch { /* 诊断不可用不能影响服务本身 */ }
+    });
   }
 
   private exited(child: ChildProcessWithoutNullStreams) {
@@ -87,10 +102,15 @@ export class Supervisor {
           } catch { /* 只解析协议行，不把潜在账号诊断文本存入日志。 */ }
         }
       });
-      worker.stderr.on('data', () => this.log('service_diagnostic'));
+      worker.stderr.on('data', (chunk: Buffer) => {
+        this.log('service_diagnostic');
+        this.appendServiceLog(chunk);
+      });
       worker.on('error', () => fail('无法启动内容服务，运行时文件可能缺失'));
       worker.on('exit', (code) => {
-        this.log('service_exit_' + code); clearTimeout(timer);
+        this.log('service_exit_' + code);
+        this.appendServiceLog(`[${new Date().toISOString()}] service exited with code ${code}\n`);
+        clearTimeout(timer);
         if (current()) {
           this.port = 0; this.child = undefined;
           // 只有对应世代的退出能作废 ready，旧回调不能触及新实例。
