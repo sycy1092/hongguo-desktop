@@ -1846,6 +1846,7 @@ class Provider:
         """Episode indexes whose source mp4 is already on disk (no upstream call)."""
         if quality not in QUALITIES:
             return []
+        self._prune_sources()
         try:
             rows = self.detail(identifier(series_id))["episodes"]
         except ProviderError:
@@ -1924,6 +1925,36 @@ class Provider:
                 size = path.stat().st_size
                 path.unlink(missing_ok=True)
                 total, count = total - size, count - 1
+        # 失败或取消的下载会留下 *.partial，超过一小时就没人要了。
+        cutoff = time.time() - 3600
+        for leftover in self.source_dir.glob("*.partial"):
+            try:
+                if leftover.stat().st_mtime < cutoff:
+                    leftover.unlink(missing_ok=True)
+            except OSError:
+                continue
+
+    def source_status(self):
+        files = list(self.source_dir.glob("*.mp4")) + list(self.source_dir.glob("*.partial"))
+        size = 0
+        for path in files:
+            try:
+                size += path.stat().st_size
+            except OSError:
+                continue
+        return {"bytes": size, "files": len(files), "limit": 512 * 1024 * 1024}
+
+    def clear_sources(self):
+        removed = 0
+        for path in list(self.source_dir.glob("*.mp4")) + list(self.source_dir.glob("*.partial")):
+            if str(path) in self._leases:
+                continue
+            try:
+                path.unlink(missing_ok=True)
+                removed += 1
+            except OSError:
+                continue
+        return removed
 
     def close(self):
         self._closed.set()

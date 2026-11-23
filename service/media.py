@@ -494,10 +494,12 @@ class MediaManager:
                                  for job in current),
                     "limit": self.limit,
                     "entries": sum(job.phase == "complete" for job in current),
-                    "active": sum(bool(job.refs) for job in current)}
+                    "active": sum(bool(job.refs) for job in current),
+                    "sources": self.source_status()}
 
     def clear_cache(self):
         self._prune(clear=True)
+        self.clear_sources()
         return self.cache_status()
 
     def set_cache_gb(self, cache_gb):
@@ -577,6 +579,14 @@ class MediaManager:
     def prefetch(self, series_id, episode, quality="auto"):
         warm = getattr(self.provider, "prefetch", None)
         return bool(warm(series_id, episode, quality)) if callable(warm) else False
+
+    def source_status(self):
+        lookup = getattr(self.provider, "source_status", None)
+        return lookup() if callable(lookup) else {"bytes": 0, "files": 0, "limit": 0}
+
+    def clear_sources(self):
+        clear = getattr(self.provider, "clear_sources", None)
+        return clear() if callable(clear) else 0
 
 
 def mount_media(app, manager):
