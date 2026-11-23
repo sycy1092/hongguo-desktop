@@ -151,7 +151,12 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
     if(next===undefined)return;
     void window.hongguo.request('/media/prefetch',{method:'POST',body:{seriesId:data.series.id,episode:next,quality:latest.current.settings.quality}}).catch(()=>{});
   },[]);
-  useEffect(()=>{if(playing)prefetchNext(detail,episode);},[playing,episode,detail,prefetchNext]);
+  // 只在本集稳定播放、且没有切换正在进行时预热下一集，避免和前台取源抢带宽。
+  useEffect(()=>{
+    if(!playing||pendingEpisode!==null)return;
+    const timer=setTimeout(()=>{if(mounted.current&&shouldPlay.current)prefetchNext(detail,episode);},10000);
+    return()=>clearTimeout(timer);
+  },[playing,episode,pendingEpisode,detail,prefetchNext]);
   // 打开抽屉或切完集时刷新缓存标记。
   useEffect(()=>{if(drawer)void refreshCached();},[drawer,episode,refreshCached]);
   const applySound = (deck: VideoDeck) => { const s = latest.current.settings; deck.video.playbackRate = s.rate; deck.video.volume = s.volume; deck.video.muted = mutedRef.current; };

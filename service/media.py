@@ -8,6 +8,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -22,6 +23,14 @@ from fastapi.responses import Response
 _FILE = re.compile(r"(?:index\.m3u8|init\.mp4|seg[0-9]{6}\.m4s)")
 _KEY = re.compile(r"[0-9a-f]{64}(?:\.part)?")
 _OWNER = "hongguo-media-v1"
+
+
+def _media_log(line: str) -> None:
+    """Session lifecycle on stderr; the Electron supervisor keeps it in service.log."""
+    try:
+        print(line, file=sys.stderr, flush=True)
+    except Exception:  # noqa: BLE001
+        pass
 _QUALITIES = {"auto", "1080p", "720p", "540p", "480p", "360p"}
 
 
@@ -325,6 +334,8 @@ class MediaManager:
 
     def _run(self, job):
         source = None
+        started = time.monotonic()
+        _media_log(f"[media] preparing ep{job.episode} {job.quality}")
         try:
             if job.stop.is_set():
                 raise MediaCancelled()
@@ -334,6 +345,7 @@ class MediaManager:
                 raise MediaCancelled()
             if not source.is_file():
                 raise FileNotFoundError("视频源不存在")
+            _media_log(f"[media] source ready ep{job.episode} in {time.monotonic() - started:.1f}s ({source.stat().st_size // 1024} KB)")
             # 整集源已落盘，读容器头即可知道真实总时长；不等待HLS完整编码。
             job.duration = self._source_duration(source, job)
             job.directory.mkdir(exist_ok=False)
@@ -352,9 +364,11 @@ class MediaManager:
                         "delivery": job.delivery, "videoCodec": job.video_codec}
             (job.directory / "complete.json").write_text(json.dumps(metadata), encoding="utf-8")
             self._promote(job)
+            _media_log(f"[media] ready ep{job.episode} in {time.monotonic() - started:.1f}s")
         except Exception as error:
             with self.guard:
                 job.phase = "cancelled" if job.stop.is_set() or isinstance(error, MediaCancelled) else "error"
+                _media_log(f"[media] {job.phase} ep{job.episode} after {time.monotonic() - started:.1f}s {getattr(error, 'code', type(error).__name__)}")
                 # 不把 CDN 凭据、绝对路径或供应商响应内容返回给界面。
                 if job.phase == "error":
                     messages = {
