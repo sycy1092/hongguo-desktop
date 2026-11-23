@@ -1890,7 +1890,7 @@ class Provider:
             if key in self._prefetched:
                 return False
             self._prefetched.add(key)
-            self._prefetch_queue.append(key)
+            self._prefetch_queue.append((key, 0, 0.0))
             if self._prefetch_worker is None or not self._prefetch_worker.is_alive():
                 self._prefetch_worker = threading.Thread(target=self._drain_prefetch, name="source-prefetch", daemon=True)
                 self._prefetch_worker.start()
@@ -1899,18 +1899,32 @@ class Provider:
     def _drain_prefetch(self):
         while True:
             with self._prefetch_guard:
-                if not self._prefetch_queue:
+                now = time.time()
+                ready = next((item for item in self._prefetch_queue if item[2] <= now), None)
+                if ready is not None:
+                    self._prefetch_queue.remove(ready)
+                elif not self._prefetch_queue:
                     self._prefetch_worker = None
                     return
-                key = self._prefetch_queue.pop(0)
+            if ready is None:
+                time.sleep(2)
+                continue
+            key, attempts, _ = ready
             try:
                 path = self.source(key[0], key[1], key[2])
                 print(f"[prefetch] ep{key[1]} ready ({path.stat().st_size // 1024} KB)", file=sys.stderr, flush=True)
             except Exception as error:
-                print(f"[prefetch] ep{key[1]} failed {getattr(error, 'code', type(error).__name__)}", file=sys.stderr, flush=True)
+                code = getattr(error, 'code', type(error).__name__)
+                print(f"[prefetch] ep{key[1]} failed {code} (attempt {attempts + 1})", file=sys.stderr, flush=True)
+                # 上游线路经常只是短暂不可用，隔一会儿再排一次，最多 3 次。
+                if attempts < 2:
+                    with self._prefetch_guard:
+                        self._prefetch_queue.append((key, attempts + 1, time.time() + 45))
+                    continue
             finally:
-                with self._prefetch_guard:
-                    self._prefetched.discard(key)
+                if attempts >= 2:
+                    with self._prefetch_guard:
+                        self._prefetched.discard(key)
 
     def _remux(self, raw, output, cancelled):
         import av

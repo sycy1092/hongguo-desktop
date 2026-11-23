@@ -171,15 +171,18 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   useEffect(()=>{if(drawer)void refreshCached();},[drawer,episode,refreshCached]);
   const applySound = (deck: VideoDeck) => { const s = latest.current.settings; deck.video.playbackRate = s.rate; deck.video.volume = s.volume; deck.video.muted = mutedRef.current; };
   const targetFor=(data:SeriesDetail,index:number,start=0,quality=latest.current.settings.quality):PlaybackTarget=>({seriesId:data.series.id,episode:index,quality,start,compatible:compatible.current,duration:episodeDurations.current.get(`${data.series.id}:${index}`)||knownDuration(data.episodes.find(item=>item.index===index)?.duration)});
-  // 没缓存过的集先用低一档画质起播（文件约一半大）；切之前直接问一次服务，避免用过期快照。
+  // 没缓存过的集：只有当 720P 已经在本地时才降档（否则会和预加载同时下两份，白占带宽）。
   const chooseQuality=useCallback(async(data:SeriesDetail,index:number)=>{
     const preferred=latest.current.settings.quality;
-    if(preferred!=='1080p')return preferred;
-    if(cachedPreferred.current.has(index))return preferred;
-    const ready=await window.hongguo.request<{ready:boolean}>('/media/probe',{method:'POST',body:{seriesId:data.series.id,episode:index,quality:preferred},timeout:5000})
+    if(!['auto','1080p'].includes(preferred))return preferred;
+    if(cachedPreferred.current.has(index)||cachedFallback.current.has(index)){
+      if(cachedPreferred.current.has(index))return preferred;
+    }
+    const ask=(quality:string)=>window.hongguo.request<{ready:boolean}>('/media/probe',{method:'POST',body:{seriesId:data.series.id,episode:index,quality},timeout:5000})
       .then(value=>!!value.ready).catch(()=>false);
-    if(ready){cachedPreferred.current.add(index);return preferred;}
-    return '720p';
+    if(await ask(preferred)){cachedPreferred.current.add(index);return preferred;}
+    if(await ask('720p')){cachedFallback.current.add(index);return '720p';}
+    return preferred;
   },[]);
   const target = (index: number, start = 0): PlaybackTarget => targetFor(latest.current.detail,index,start);
   const prepareSeason=useCallback((destination:SeasonDestination)=>{
