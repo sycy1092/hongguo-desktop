@@ -138,11 +138,16 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const autoTheater=useRef(false);
   useEffect(()=>{if(autoTheater.current)return;autoTheater.current=true;const frame=requestAnimationFrame(()=>{if(!theaterRef.current&&mounted.current)toggleTheater();});return()=>cancelAnimationFrame(frame);},[toggleTheater]);
   // 哪些集已经有本地片源：切过去接近秒开，没有的要先下载 10～20 秒。
+  const cachedPreferred=useRef<Set<number>>(new Set()),cachedFallback=useRef<Set<number>>(new Set()),cachedKnown=useRef(false);
   const refreshCached=useCallback(()=>{
-    const seriesId=latest.current.detail.series.id,quality=latest.current.settings.quality;
-    return window.hongguo.request<{episodes:number[]}>('/media/cached',{method:'POST',body:{seriesId,quality}})
-      .then(result=>{if(mounted.current&&latest.current.detail.series.id===seriesId)setCachedEpisodes(new Set(result.episodes||[]));})
-      .catch(()=>{});
+    const seriesId=latest.current.detail.series.id,preferred=latest.current.settings.quality,fallback=preferred==='1080p'?'720p':preferred;
+    const ask=(quality:string)=>window.hongguo.request<{episodes:number[]}>('/media/cached',{method:'POST',body:{seriesId,quality}})
+      .then(value=>new Set(value.episodes||[])).catch(()=>new Set<number>());
+    return Promise.all([ask(preferred),ask(fallback)]).then(([first,second])=>{
+      if(!mounted.current||latest.current.detail.series.id!==seriesId)return;
+      cachedPreferred.current=first;cachedFallback.current=second;cachedKnown.current=true;
+      setCachedEpisodes(new Set([...first,...second]));
+    });
   },[setCachedEpisodes]);
   useEffect(()=>{setCachedEpisodes(new Set());void refreshCached();},[detail.series.id,refreshCached]);
   // 当前集播起来就把下一集的片源温到本地，连播/切下一集不用等下载。
@@ -160,7 +165,13 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   // 打开抽屉或切完集时刷新缓存标记。
   useEffect(()=>{if(drawer)void refreshCached();},[drawer,episode,refreshCached]);
   const applySound = (deck: VideoDeck) => { const s = latest.current.settings; deck.video.playbackRate = s.rate; deck.video.volume = s.volume; deck.video.muted = mutedRef.current; };
-  const targetFor=(data:SeriesDetail,index:number,start=0):PlaybackTarget=>({seriesId:data.series.id,episode:index,quality:latest.current.settings.quality,start,compatible:compatible.current,duration:episodeDurations.current.get(`${data.series.id}:${index}`)||knownDuration(data.episodes.find(item=>item.index===index)?.duration)});
+  const targetFor=(data:SeriesDetail,index:number,start=0,quality=latest.current.settings.quality):PlaybackTarget=>({seriesId:data.series.id,episode:index,quality,start,compatible:compatible.current,duration:episodeDurations.current.get(`${data.series.id}:${index}`)||knownDuration(data.episodes.find(item=>item.index===index)?.duration)});
+  // 没缓存过的集先用低一档画质起播（文件约一半大，少等一半时间）。
+  const fastQuality=useCallback((data:SeriesDetail,index:number)=>{
+    const preferred=latest.current.settings.quality;
+    if(preferred!=='1080p'||!cachedKnown.current)return preferred;
+    return cachedPreferred.current.has(index)?preferred:'720p';
+  },[]);
   const target = (index: number, start = 0): PlaybackTarget => targetFor(latest.current.detail,index,start);
   const prepareSeason=useCallback((destination:SeasonDestination)=>{
     const data=destination.detail,source=destination.result.seriesId,deck=current();
@@ -195,7 +206,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const selectMedia=useCallback(async(data:SeriesDetail,index:number,automatic=false,start=0,keepPaused=false,force=false,{allow=()=>true,revealControls=true}:{allow?:()=>boolean;revealControls?:boolean}={})=>{
 
     if(!data.episodes.some(item=>item.index===index)||closed.current||!allow())return;
-    const next=targetFor(data,index,start),displayed=current(),account=latest.current.accountKey;
+    const next=targetFor(data,index,start,force?undefined:fastQuality(data,index)),displayed=current(),account=latest.current.accountKey;
     if(!force&&displayed?.target.seriesId===next.seriesId&&displayed.target.episode===index&&displayed.target.quality===next.quality&&Math.abs(displayed.target.start-start)<.1){if(revealControls)hide();return;}
     rememberDetail(data);
     requested.current = next;retryTarget.current=null; automaticSwitch.current = automatic;setAutomaticPreparing(automatic);
@@ -211,6 +222,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
 
       if (!committed || closed.current){if(requested.current===next){requested.current=null;setPendingEpisode(null);setPendingPosition(null);setAutomaticPreparing(false);}return;}
       requested.current = null; setPendingEpisode(null);setPendingPosition(null);setAutomaticPreparing(false);scheduleNext(committed);
+      if(next.quality!==latest.current.settings.quality)setNotice(`这一集还没缓存，先用 ${next.quality.toUpperCase()} 起播`);
     } catch (failure) {
       if (closed.current || requested.current !== next) return;
       retryTarget.current=next;requested.current=null;setPendingEpisode(null);setPendingPosition(null);setAutomaticPreparing(false); setPhase(''); setError((failure as Error).message || '视频准备失败，请重试'); setChrome(true);
