@@ -570,7 +570,30 @@ class MediaManager:
         self._prune()
 
 
+    def cached_episodes(self, series_id, quality="auto"):
+        lookup = getattr(self.provider, "cached_episodes", None)
+        return lookup(series_id, quality) if callable(lookup) else []
+
+    def prefetch(self, series_id, episode, quality="auto"):
+        warm = getattr(self.provider, "prefetch", None)
+        return bool(warm(series_id, episode, quality)) if callable(warm) else False
+
+
 def mount_media(app, manager):
+    @app.post("/media/cached")
+    def cached_episodes(body: dict = Body(...)):
+        try:
+            return {"episodes": manager.cached_episodes(body.get("seriesId"), body.get("quality", "auto"))}
+        except (ValueError, TypeError) as error:
+            raise HTTPException(400, str(error)) from None
+
+    @app.post("/media/prefetch")
+    def prefetch_source(body: dict = Body(...)):
+        try:
+            return {"started": manager.prefetch(body.get("seriesId"), body.get("episode"), body.get("quality", "auto"))}
+        except (ValueError, TypeError) as error:
+            raise HTTPException(400, str(error)) from None
+
     @app.post("/media/session")
     def create_session(request: Request, body: dict = Body(...)):
         try:

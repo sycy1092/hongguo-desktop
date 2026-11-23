@@ -59,6 +59,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const [muted, setMuted] = useState(false), [comments, setComments] = useState(false), [theater, setTheater] = useState(false), [favorite, setFavorite] = useState(false), [notice, setNotice] = useState(''), [fullscreen, setFullscreen] = useState(false);
   const [pendingPosition,setPendingPosition]=useState<number|null>(null);
   const [phaseSeconds,setPhaseSeconds]=useState(0);
+  const [cachedEpisodes,setCachedEpisodes]=useState<Set<number>>(()=>new Set());
   const [danmakuPanel, setDanmakuPanel] = useState(false), [danmakuRefresh, setDanmakuRefresh] = useState(0);
   const [drawer, setDrawer] = useState(false);
   useEffect(() => {
@@ -133,6 +134,23 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   // 播放页默认就是窗口全屏；用户按 T / 点监视图标退出后不再自动进入。
   const autoTheater=useRef(false);
   useEffect(()=>{if(autoTheater.current)return;autoTheater.current=true;const frame=requestAnimationFrame(()=>{if(!theaterRef.current&&mounted.current)toggleTheater();});return()=>cancelAnimationFrame(frame);},[toggleTheater]);
+  // 哪些集已经有本地片源：切过去接近秒开，没有的要先下载 10～20 秒。
+  const refreshCached=useCallback(()=>{
+    const seriesId=latest.current.detail.series.id,quality=latest.current.settings.quality;
+    return window.hongguo.request<{episodes:number[]}>('/media/cached',{method:'POST',body:{seriesId,quality}})
+      .then(result=>{if(mounted.current&&latest.current.detail.series.id===seriesId)setCachedEpisodes(new Set(result.episodes||[]));})
+      .catch(()=>{});
+  },[setCachedEpisodes]);
+  useEffect(()=>{setCachedEpisodes(new Set());void refreshCached();},[detail.series.id,refreshCached]);
+  // 当前集播起来就把下一集的片源温到本地，连播/切下一集不用等下载。
+  const prefetchNext=useCallback((data:SeriesDetail,index:number)=>{
+    const next=adjacentEpisode(data.episodes,index,1);
+    if(next===undefined)return;
+    void window.hongguo.request('/media/prefetch',{method:'POST',body:{seriesId:data.series.id,episode:next,quality:latest.current.settings.quality}}).catch(()=>{});
+  },[]);
+  useEffect(()=>{if(playing)prefetchNext(detail,episode);},[playing,episode,detail,prefetchNext]);
+  // 打开抽屉或切完集时刷新缓存标记。
+  useEffect(()=>{if(drawer)void refreshCached();},[drawer,episode,refreshCached]);
   const applySound = (deck: VideoDeck) => { const s = latest.current.settings; deck.video.playbackRate = s.rate; deck.video.volume = s.volume; deck.video.muted = mutedRef.current; };
   const targetFor=(data:SeriesDetail,index:number,start=0):PlaybackTarget=>({seriesId:data.series.id,episode:index,quality:latest.current.settings.quality,start,compatible:compatible.current,duration:episodeDurations.current.get(`${data.series.id}:${index}`)||knownDuration(data.episodes.find(item=>item.index===index)?.duration)});
   const target = (index: number, start = 0): PlaybackTarget => targetFor(latest.current.detail,index,start);
@@ -485,7 +503,8 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
         <div className="player-drawer-meta"><span>共 {detail.episodes.length} 集 · 第 {episode} 集</span><label className="autoplay-switch"><input type="checkbox" checked={settings.autoplay} onChange={e=>onSettings({autoplay:e.target.checked})}/> 自动连播</label></div>
         <div className="player-drawer-body" ref={drawerBody}>
           <SeasonOverview series={detail.series} action="play" pendingId={pickingSeason} disabled={!current()} onSelect={series=>void selectSeason(series)}/>
-          <EpisodeGrid episodes={detail.episodes} episode={episode} onSelect={selectEpisode}/>
+          {cachedEpisodes.size>0&&<p className="drawer-legend"><i/>{cachedEpisodes.size} 集已有本地片源，切过去更快</p>}
+          <EpisodeGrid episodes={detail.episodes} episode={episode} cached={cachedEpisodes} onSelect={selectEpisode}/>
         </div>
       </aside>}
       <dialog ref={shortcutDialog} className="player-shortcut-dialog" aria-labelledby="player-shortcut-title">
@@ -497,8 +516,8 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
     {seasonInfo.source===detail.series.id&&seasonInfo.phase!=='idle'&&<aside className="next-season-card" data-season-status={seasonInfo.phase} aria-live="polite"><div><small>{seasonInfo.destination?.detail?`第 ${seasonInfo.destination.result.nextSeason} 季 · 共 ${seasonInfo.destination.detail.series.totalEpisodes||seasonInfo.destination.detail.episodes.length} 集`:'下一季'}</small><strong>{seasonInfo.destination?.detail?.series.title||(seasonInfo.phase==='ambiguous'?'季关联暂不明确':seasonInfo.phase==='none'?'暂无已确认的下一季':'正在查找下一季')}</strong><span>{seasonInfo.error||(seasonInfo.phase==='ready'?'首集已准备好，季末自动衔接':seasonInfo.phase==='identified'?'已确认下一季，季末预热首集':seasonInfo.phase==='preparing'?'正在准备下一季首集':seasonInfo.phase==='looking'?'正在确认官方季关联':seasonInfo.phase==='ambiguous'?'存在多个候选，已暂停自动跨季':'本季结束后将停止播放')}</span></div>{['looking','preparing'].includes(seasonInfo.phase)&&<LoaderCircle className="spin" size={18}/>}<div className="next-season-actions">{seasonInfo.phase==='error'&&<button className="btn" onClick={retrySeason}>重试下一季</button>}{seasonInfo.destination?.detail&&atSeasonEnd&&<button className="btn primary" disabled={continuing} onClick={()=>void continueSeason(false)}>{continuing?'正在衔接':'播放下一季'}</button>}</div></aside>}
   </div>;
 }
-const EpisodeGrid=memo(function EpisodeGrid({episodes,episode,onSelect}:{episodes:Episode[];episode:number;onSelect:(episode:number)=>void|Promise<void>}){
-  return <div className="episode-grid">{episodes.map(e=><button key={e.index} className={episode===e.index?'selected':''} aria-label={`播放第${e.index}集`} aria-current={episode===e.index?'true':undefined} onClick={()=>void onSelect(e.index)}>{e.index}{episode===e.index&&<span className="playing-bars">▥</span>}</button>)}</div>;
+const EpisodeGrid=memo(function EpisodeGrid({episodes,episode,cached,onSelect}:{episodes:Episode[];episode:number;cached?:Set<number>;onSelect:(episode:number)=>void|Promise<void>}){
+  return <div className="episode-grid">{episodes.map(e=><button key={e.index} className={episode===e.index?'selected':''} aria-label={`播放第${e.index}集`} title={cached?.has(e.index)?'已缓存片源，切换更快':'切换前需要先取片源'} aria-current={episode===e.index?'true':undefined} onClick={()=>void onSelect(e.index)}>{e.index}{episode===e.index&&<span className="playing-bars">▥</span>}{cached?.has(e.index)&&episode!==e.index&&<i className="episode-cached" aria-hidden="true"/>}</button>)}</div>;
 });
 function Comments({seriesId,episode,onClose}:{seriesId:string;episode:number;onClose:()=>void}){
   const [page,setPage]=useState<CommentsPage>({items:[],total:0,cursor:0,hasMore:false}),[busy,setBusy]=useState(true),[error,setError]=useState('');const generation=useRef(0);

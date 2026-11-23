@@ -376,6 +376,8 @@ class Provider:
         self.catalog_cache = CatalogCache(self.data_dir / "catalog-cache.json")
         self._source_guard = threading.Condition()
         self._sources_running = set()
+        self._prefetched = set()
+        self._prefetch_guard = threading.Lock()
         self._leases = {}
         self._write_lock = threading.Lock()
         self.qr_login = QrLoginManager(self.account, self._commit_qr_session,
@@ -1836,6 +1838,50 @@ class Provider:
                 with self._source_guard:
                     self._sources_running.discard(key)
                     self._source_guard.notify_all()
+
+    def _source_path(self, row, quality):
+        return self.source_dir / f"{row['vid']}_{quality}.mp4"
+
+    def cached_episodes(self, series_id, quality="auto"):
+        """Episode indexes whose source mp4 is already on disk (no upstream call)."""
+        if quality not in QUALITIES:
+            return []
+        try:
+            rows = self.detail(identifier(series_id))["episodes"]
+        except ProviderError:
+            return []
+        ready = []
+        for row in rows:
+            path = self._source_path(row, quality)
+            try:
+                if path.is_file() and path.stat().st_size:
+                    ready.append(row["index"])
+            except OSError:
+                continue
+        return ready
+
+    def prefetch(self, series_id, episode, quality="auto"):
+        """Warm this episode's source in the background so a later switch is quick."""
+        if quality not in QUALITIES:
+            raise ProviderError("INPUT_INVALID", "清晰度不正确", 400)
+        target = int(episode)
+        key = f"{identifier(series_id)}:{target}:{quality}"
+        with self._prefetch_guard:
+            if key in self._prefetched:
+                return False
+            self._prefetched.add(key)
+
+        def run():
+            try:
+                self.source(identifier(series_id), target, quality)
+            except Exception:
+                pass
+            finally:
+                with self._prefetch_guard:
+                    self._prefetched.discard(key)
+
+        threading.Thread(target=run, name="source-prefetch", daemon=True).start()
+        return True
 
     def _remux(self, raw, output, cancelled):
         import av

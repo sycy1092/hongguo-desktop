@@ -29,6 +29,8 @@ const accepted = [
   '/media/session/abc_DEF-123',
   '/media/cache',
   '/media/cache/clear',
+  '/media/cached',
+  '/media/prefetch',
 ];
 
 const rejected = [
