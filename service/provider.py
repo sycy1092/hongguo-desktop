@@ -20,6 +20,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import sys
 import threading
 import time
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -378,6 +379,8 @@ class Provider:
         self._sources_running = set()
         self._prefetched = set()
         self._prefetch_guard = threading.Lock()
+        self._prefetch_queue = []
+        self._prefetch_worker = None
         self._leases = {}
         self._write_lock = threading.Lock()
         self.qr_login = QrLoginManager(self.account, self._commit_qr_session,
@@ -1879,27 +1882,35 @@ class Provider:
             return False
 
     def prefetch(self, series_id, episode, quality="auto"):
-        """Warm this episode's source in the background so a later switch is quick."""
+        """Queue this episode's source for a background warm-up; one download at a time."""
         if quality not in QUALITIES:
             raise ProviderError("INPUT_INVALID", "清晰度不正确", 400)
-        target = int(episode)
-        key = f"{identifier(series_id)}:{target}:{quality}"
+        key = (identifier(series_id), int(episode), quality)
         with self._prefetch_guard:
             if key in self._prefetched:
                 return False
             self._prefetched.add(key)
+            self._prefetch_queue.append(key)
+            if self._prefetch_worker is None or not self._prefetch_worker.is_alive():
+                self._prefetch_worker = threading.Thread(target=self._drain_prefetch, name="source-prefetch", daemon=True)
+                self._prefetch_worker.start()
+        return True
 
-        def run():
+    def _drain_prefetch(self):
+        while True:
+            with self._prefetch_guard:
+                if not self._prefetch_queue:
+                    self._prefetch_worker = None
+                    return
+                key = self._prefetch_queue.pop(0)
             try:
-                self.source(identifier(series_id), target, quality)
-            except Exception:
-                pass
+                path = self.source(key[0], key[1], key[2])
+                print(f"[prefetch] ep{key[1]} ready ({path.stat().st_size // 1024} KB)", file=sys.stderr, flush=True)
+            except Exception as error:
+                print(f"[prefetch] ep{key[1]} failed {getattr(error, 'code', type(error).__name__)}", file=sys.stderr, flush=True)
             finally:
                 with self._prefetch_guard:
                     self._prefetched.discard(key)
-
-        threading.Thread(target=run, name="source-prefetch", daemon=True).start()
-        return True
 
     def _remux(self, raw, output, cancelled):
         import av
@@ -1935,7 +1946,7 @@ class Provider:
             total = sum(path.stat().st_size for path in files)
             count = len(files)
             for path in files:
-                if total <= 512 * 1024 * 1024 and count <= 8:
+                if total <= 1536 * 1024 * 1024 and count <= 16:
                     break
                 if str(path) in self._leases:
                     continue
@@ -1959,7 +1970,7 @@ class Provider:
                 size += path.stat().st_size
             except OSError:
                 continue
-        return {"bytes": size, "files": len(files), "limit": 512 * 1024 * 1024}
+        return {"bytes": size, "files": len(files), "limit": 1536 * 1024 * 1024}
 
     def clear_sources(self):
         removed = 0

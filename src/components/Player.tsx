@@ -150,16 +150,21 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
     });
   },[setCachedEpisodes]);
   useEffect(()=>{setCachedEpisodes(new Set());void refreshCached();},[detail.series.id,refreshCached]);
-  // 当前集播起来就把下一集的片源温到本地，连播/切下一集不用等下载。
+  // 当前集播起来就把后面几集的片源温到本地（服务端排队逐个下载），连播/切集不用等。
   const prefetchNext=useCallback((data:SeriesDetail,index:number)=>{
-    const next=adjacentEpisode(data.episodes,index,1);
-    if(next===undefined)return;
-    void window.hongguo.request('/media/prefetch',{method:'POST',body:{seriesId:data.series.id,episode:next,quality:latest.current.settings.quality}}).catch(()=>{});
+    const quality=latest.current.settings.quality;
+    let cursor=index;
+    for(let step=0;step<3;step+=1){
+      const target=adjacentEpisode(data.episodes,cursor,1);
+      if(target===undefined)break;
+      void window.hongguo.request('/media/prefetch',{method:'POST',body:{seriesId:data.series.id,episode:target,quality}}).catch(()=>{});
+      cursor=target;
+    }
   },[]);
-  // 只在本集稳定播放、且没有切换正在进行时预热下一集，避免和前台取源抢带宽。
+  // 只在本集稳定播放、且没有切换正在进行时预热，避免和前台取源抢带宽。
   useEffect(()=>{
     if(!playing||pendingEpisode!==null)return;
-    const timer=setTimeout(()=>{if(mounted.current&&shouldPlay.current)prefetchNext(detail,episode);},10000);
+    const timer=setTimeout(()=>{if(mounted.current&&shouldPlay.current)prefetchNext(detail,episode);},8000);
     return()=>clearTimeout(timer);
   },[playing,episode,pendingEpisode,detail,prefetchNext]);
   // 打开抽屉或切完集时刷新缓存标记。
