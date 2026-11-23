@@ -166,11 +166,15 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   useEffect(()=>{if(drawer)void refreshCached();},[drawer,episode,refreshCached]);
   const applySound = (deck: VideoDeck) => { const s = latest.current.settings; deck.video.playbackRate = s.rate; deck.video.volume = s.volume; deck.video.muted = mutedRef.current; };
   const targetFor=(data:SeriesDetail,index:number,start=0,quality=latest.current.settings.quality):PlaybackTarget=>({seriesId:data.series.id,episode:index,quality,start,compatible:compatible.current,duration:episodeDurations.current.get(`${data.series.id}:${index}`)||knownDuration(data.episodes.find(item=>item.index===index)?.duration)});
-  // 没缓存过的集先用低一档画质起播（文件约一半大，少等一半时间）。
-  const fastQuality=useCallback((data:SeriesDetail,index:number)=>{
+  // 没缓存过的集先用低一档画质起播（文件约一半大）；切之前直接问一次服务，避免用过期快照。
+  const chooseQuality=useCallback(async(data:SeriesDetail,index:number)=>{
     const preferred=latest.current.settings.quality;
-    if(preferred!=='1080p'||!cachedKnown.current)return preferred;
-    return cachedPreferred.current.has(index)?preferred:'720p';
+    if(preferred!=='1080p')return preferred;
+    if(cachedPreferred.current.has(index))return preferred;
+    const ready=await window.hongguo.request<{ready:boolean}>('/media/probe',{method:'POST',body:{seriesId:data.series.id,episode:index,quality:preferred},timeout:5000})
+      .then(value=>!!value.ready).catch(()=>false);
+    if(ready){cachedPreferred.current.add(index);return preferred;}
+    return '720p';
   },[]);
   const target = (index: number, start = 0): PlaybackTarget => targetFor(latest.current.detail,index,start);
   const prepareSeason=useCallback((destination:SeasonDestination)=>{
@@ -206,7 +210,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const selectMedia=useCallback(async(data:SeriesDetail,index:number,automatic=false,start=0,keepPaused=false,force=false,{allow=()=>true,revealControls=true}:{allow?:()=>boolean;revealControls?:boolean}={})=>{
 
     if(!data.episodes.some(item=>item.index===index)||closed.current||!allow())return;
-    const next=targetFor(data,index,start,force?undefined:fastQuality(data,index)),displayed=current(),account=latest.current.accountKey;
+    const next=targetFor(data,index,start,force?undefined:await chooseQuality(data,index)),displayed=current(),account=latest.current.accountKey;
     if(!force&&displayed?.target.seriesId===next.seriesId&&displayed.target.episode===index&&displayed.target.quality===next.quality&&Math.abs(displayed.target.start-start)<.1){if(revealControls)hide();return;}
     rememberDetail(data);
     requested.current = next;retryTarget.current=null; automaticSwitch.current = automatic;setAutomaticPreparing(automatic);

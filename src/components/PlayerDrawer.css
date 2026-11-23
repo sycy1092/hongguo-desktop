@@ -17,8 +17,8 @@
 .player-drawer .episode-grid button .episode-cached{position:absolute;top:4px;right:5px;width:5px;height:5px;border-radius:50%;background:#5cc98a;box-shadow:0 0 0 1px #0b0b0d66}
 .player-drawer .drawer-legend{display:flex;align-items:center;gap:6px;margin:0 0 10px;color:#9b9ba4;font-size:11px}
 .player-drawer .drawer-legend i{width:5px;height:5px;border-radius:50%;background:#5cc98a;display:inline-block}
-/* 抽屉开着时把控制栏和全屏标题栏抬到最上层，按钮不被抽屉盖住。 */
-.video-stage.drawer-open .player-controls{z-index:6}
+/* 抽屉开着时把控制栏和全屏标题栏抬到最上层；控制栏给不透明底，集数不再透出来。 */
+.video-stage.drawer-open .player-controls{z-index:6;background:#0b0b0de6;backdrop-filter:blur(6px);border-radius:0 0 10px 0}
 .video-stage.drawer-open .fullscreen-toolbar{right:min(380px,100%)}
 .player-drawer .season-overview{margin:0 0 14px;padding:0 0 14px;border-top:0;border-bottom:1px solid #ffffff14}
 .player-drawer .season-overview-heading{margin-bottom:10px;gap:8px}

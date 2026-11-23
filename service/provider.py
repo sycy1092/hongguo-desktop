@@ -1861,6 +1861,23 @@ class Provider:
                 continue
         return ready
 
+    def source_ready(self, series_id, episode, quality="auto"):
+        """Whether this episode's source is already on disk; filesystem + cached detail only."""
+        if quality not in QUALITIES:
+            return False
+        try:
+            rows = self.detail(identifier(series_id))["episodes"]
+        except ProviderError:
+            return False
+        row = next((item for item in rows if item["index"] == int(episode)), None)
+        if not row:
+            return False
+        path = self._source_path(row, quality)
+        try:
+            return path.is_file() and path.stat().st_size > 0
+        except OSError:
+            return False
+
     def prefetch(self, series_id, episode, quality="auto"):
         """Warm this episode's source in the background so a later switch is quick."""
         if quality not in QUALITIES:

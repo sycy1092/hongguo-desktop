@@ -594,6 +594,10 @@ class MediaManager:
         warm = getattr(self.provider, "prefetch", None)
         return bool(warm(series_id, episode, quality)) if callable(warm) else False
 
+    def source_ready(self, series_id, episode, quality="auto"):
+        check = getattr(self.provider, "source_ready", None)
+        return bool(check(series_id, episode, quality)) if callable(check) else False
+
     def source_status(self):
         lookup = getattr(self.provider, "source_status", None)
         return lookup() if callable(lookup) else {"bytes": 0, "files": 0, "limit": 0}
@@ -608,6 +612,13 @@ def mount_media(app, manager):
     def cached_episodes(body: dict = Body(...)):
         try:
             return {"episodes": manager.cached_episodes(body.get("seriesId"), body.get("quality", "auto"))}
+        except (ValueError, TypeError) as error:
+            raise HTTPException(400, str(error)) from None
+
+    @app.post("/media/probe")
+    def probe_source(body: dict = Body(...)):
+        try:
+            return {"ready": manager.source_ready(body.get("seriesId"), body.get("episode"), body.get("quality", "auto"))}
         except (ValueError, TypeError) as error:
             raise HTTPException(400, str(error)) from None
 

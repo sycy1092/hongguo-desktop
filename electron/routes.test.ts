@@ -31,6 +31,7 @@ const accepted = [
   '/media/cache/clear',
   '/media/cached',
   '/media/prefetch',
+  '/media/probe',
 ];
 
 const rejected = [
