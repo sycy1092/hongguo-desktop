@@ -64,4 +64,29 @@ class FeatureRoutesTests(unittest.TestCase):
         self.assertEqual(result.status_code,410);self.assertEqual(result.json()['error']['code'],'QR_EXPIRED')
         self.assertEqual(client.delete('/account/qr/'+identifier,headers=self.headers).json()['status'],'cancelled')
 
+    def test_access_and_error_lines_reach_stderr_without_media_ids(self):
+        import io,contextlib
+        self.provider.season_overview=Mock(return_value={'status':'single'})
+        self.provider.next_season=Mock(side_effect=ProviderError('MEDIA_WEB_UNAVAILABLE','官网播放线路暂时不可用',502))
+        client=TestClient(create_app(self.provider,'a'*64))
+        buffer=io.StringIO()
+        with contextlib.redirect_stderr(buffer):
+            client.get('/catalog/series/12345678/seasons',headers=self.headers)
+            client.get('/catalog/series/12345678/next-season',headers=self.headers)
+        lines=[line for line in buffer.getvalue().splitlines() if line.startswith('[')]
+        self.assertTrue(any(line.startswith('[access] 200 ') and 'GET /catalog/series/12345678/seasons' in line for line in lines),lines)
+        self.assertTrue(any(line.startswith('[error] 502 MEDIA_WEB_UNAVAILABLE ') for line in lines),lines)
+        self.assertFalse(any('12345678/seasons?token=' in line for line in lines),lines)
+
+    def test_media_session_paths_are_masked_in_the_log(self):
+        import io,contextlib
+        client=TestClient(create_app(self.provider,'a'*64))
+        buffer=io.StringIO()
+        with contextlib.redirect_stderr(buffer):
+            client.get('/media/session/abc123/index.m3u8',headers=self.headers)
+        lines=[line for line in buffer.getvalue().splitlines() if line.startswith('[access]')]
+        self.assertTrue(lines,lines)
+        self.assertIn('/media/session/<id>/index.m3u8',lines[0])
+        self.assertNotIn('abc123',lines[0])
+
 if __name__=='__main__':unittest.main()

@@ -57,6 +57,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const [playing, setPlaying] = useState(false), [chrome, setChrome] = useState(true), [automaticPreparing,setAutomaticPreparing]=useState(false), [position, setPosition] = useState(initialPosition), [duration, setDuration] = useState(0), [buffered, setBuffered] = useState(0);
   const [muted, setMuted] = useState(false), [comments, setComments] = useState(false), [theater, setTheater] = useState(false), [favorite, setFavorite] = useState(false), [notice, setNotice] = useState(''), [fullscreen, setFullscreen] = useState(false);
   const [pendingPosition,setPendingPosition]=useState<number|null>(null);
+  const [phaseSeconds,setPhaseSeconds]=useState(0);
   const [danmakuPanel, setDanmakuPanel] = useState(false), [danmakuRefresh, setDanmakuRefresh] = useState(0);
   const [drawer, setDrawer] = useState(false);
   useEffect(() => {
@@ -125,6 +126,8 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
     finally{favoritePending.current=false;if(mounted.current)setFavoriteBusy(false);}
   };
   const toggleTheater=useCallback(()=>{const scroll=playbackLayout.current?.closest('.content-scroll') as HTMLElement|null;const next=!theaterRef.current;if(next)theaterScroll.current=scroll?.scrollTop||0;theaterRef.current=next;setTheater(next);requestAnimationFrame(()=>{if(scroll)scroll.scrollTop=next?0:theaterScroll.current;});hide();},[hide]);
+  // 等片源时给出秒数：上游偶发要 30～40 秒才失败，没有秒数看起来就是死机。
+  useEffect(()=>{setPhaseSeconds(0);if(!phase)return;const timer=setInterval(()=>setPhaseSeconds(value=>value+1),1000);return()=>clearInterval(timer);},[phase]);
   // 播放页默认就是窗口全屏；用户按 T / 点监视图标退出后不再自动进入。
   const autoTheater=useRef(false);
   useEffect(()=>{if(autoTheater.current)return;autoTheater.current=true;const frame=requestAnimationFrame(()=>{if(!theaterRef.current&&mounted.current)toggleTheater();});return()=>cancelAnimationFrame(frame);},[toggleTheater]);
@@ -183,6 +186,8 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
     } catch (failure) {
       if (closed.current || requested.current !== next) return;
       retryTarget.current=next;requested.current=null;setPendingEpisode(null);setPendingPosition(null);setAutomaticPreparing(false); setPhase(''); setError((failure as Error).message || '视频准备失败，请重试'); setChrome(true);
+      // 自动连播失败时不能只是停在上一集片尾，给一条看得见的提示。
+      if(automatic)setNotice(((failure as Error).message||'下一集片源暂时不可用')+'，可点“重试当前集”或换一集');
     }
   }, [hide, saveDeck, scheduleNext,rememberDetail]);
   const selectEpisode=useCallback((index:number,automatic=false,start=0,keepPaused=false,force=false,options?:{revealControls?:boolean})=>{if(!automatic){cancelSeasonPick();seasonTransition.current=null;setContinuing(false);}return selectMedia(latest.current.detail,index,automatic,start,keepPaused,force,options);},[selectMedia,cancelSeasonPick]);
@@ -413,6 +418,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const playIntent=playing||(continuing||!!pickingSeason)&&shouldPlay.current;
   const retrySeason=()=>{if(seasonRef.current.destination?.detail){setError('');retryTarget.current=null;prepareSeason(seasonRef.current.destination);}else void lookupSeason(true);};
   const stageClassName=['video-stage',chrome?'':'controls-hidden',automaticPreparing?'auto-switching':'',drawer?'drawer-open':''].filter(Boolean).join(' ');
+  const phaseLabel = phaseSeconds >= 3 ? `${phase}（已等 ${phaseSeconds} 秒${phaseSeconds >= 15 ? '，仍在重试' : ''}）` : phase;
   const sliderPosition = duration ? Math.min(duration, pendingPosition ?? position) : 0;
   return <div className={`player-page ${theater?'player-theater':''}`}>
     <div className="player-heading"><button className="btn" onClick={close}><ArrowLeft size={17}/> 返回</button><div className="player-heading-title"><h2>{detail.series.title}</h2><span>第 {episode} 集 · 共 {detail.episodes.length} 集</span>{pendingEpisode&&<small className="switch-status">{pendingPosition!==null?`正在定位到 ${time(pendingPosition)}`:`正在准备第 ${pendingEpisode} 集，保留当前画面`}</small>}</div>{detail.series.intro.trim()&&<p className="player-heading-intro" title={detail.series.intro}>{detail.series.intro}</p>}<button className={`icon-button player-favorite ${favorite?'active':''}`} title={favoriteBusy?'正在同步收藏':favorite?'取消收藏':'收藏'} aria-label={favoriteBusy?'正在同步收藏':favorite?'取消收藏':'收藏'} aria-pressed={favorite} disabled={favoriteBusy} onClick={()=>void changeFavorite()}>{favoriteBusy?<LoaderCircle className="spin" size={20}/>:<Heart size={20} fill={favorite?'currentColor':'none'}/>}</button></div>
@@ -424,10 +430,13 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
       {[0,1].map(index=><video key={index} ref={element=>{videos.current[index]=element;}} className="decoder-video" data-active={active===index?'true':'false'} data-series-id={active===index?detail.series.id:undefined} data-episode={active===index?episode:undefined} playsInline
         onClick={()=>{if(current()?.index!==index)return;clearTimeout(clickTimer.current);clickTimer.current=setTimeout(toggle,220);}} onDoubleClick={()=>{if(current()?.index!==index)return;clearTimeout(clickTimer.current);void toggleFullscreen();}}
         onTimeUpdate={()=>onTime(index)} onDurationChange={()=>onTime(index)} onProgress={()=>onTime(index)} onPlaying={()=>{if(current()?.index!==index)return;setPlaying(true);setPhase('');if(automaticSwitch.current){automaticSwitch.current=false;setChrome(false);}else scheduleChromeHide();}}
-      onPause={()=>{const deck=current();if(deck?.index!==index||!deck.video.paused)return;setPlaying(false);const naturallyEnding=latest.current.settings.autoplay&&deck.video.ended;if(!naturallyEnding&&!automaticSwitch.current&&!requested.current){if(!shouldPlay.current){setPhase('');setChrome(true);}void saveDeck(deck);}}} onWaiting={()=>{if(current()?.index===index&&!requested.current&&shouldPlay.current)setPhase('缓冲中');}} onEnded={()=>ended(index)}/>)}
+      onPause={()=>{const deck=current();if(deck?.index!==index||!deck.video.paused)return;setPlaying(false);const naturallyEnding=latest.current.settings.autoplay&&deck.video.ended;
+        // onEnded 有时不会到达（流被截断、时长未知），这里兜一下，避免停在片尾没有任何反应。
+        if(naturallyEnding&&!requested.current&&!seasonPick.current)finishEpisode(deck);
+        if(!naturallyEnding&&!automaticSwitch.current&&!requested.current){if(!shouldPlay.current){setPhase('');setChrome(true);}void saveDeck(deck);}}} onWaiting={()=>{if(current()?.index===index&&!requested.current&&shouldPlay.current)setPhase('缓冲中');}} onEnded={()=>ended(index)}/>)}
       {episodeMeta && <Danmaku key={`${detail.series.id}:${episode}:${accountKey}`} seriesId={detail.series.id} episode={episode} vid={episodeMeta.vid} accountKey={accountKey} isActive={isActive} getVideo={activeVideo} initialTime={detail.series.id===starting.detail.series.id&&episode===starting.episode?starting.position:0} metadataDuration={duration || episodeMeta.duration || 0} preferences={danmakuSettings} refreshToken={danmakuRefresh} onStatus={setDanmakuStatus}/>}
       {notice&&<div className="player-notice player-feedback" role="status">{favoriteBusy&&<LoaderCircle className="spin" size={17}/>}<span>{notice}</span><button aria-label="关闭播放提示" onClick={()=>setNotice('')}><X size={15}/></button></div>}
-      {phase&&!error&&!current()&&<div className="player-status"><div className={playing?'':'spinner'}/><span>{phase}</span>{phase==='点击开始播放'&&<button className="btn primary" onClick={toggle}><Play size={18}/>播放</button>}</div>}
+      {phase&&!error&&!current()&&<div className="player-status"><div className={playing?'':'spinner'}/><span>{phaseLabel}</span>{phase==='点击开始播放'&&<button className="btn primary" onClick={toggle}><Play size={18}/>播放</button>}</div>}
       {phase&&!error&&current()&&!automaticPreparing&&(phase==='缓冲中'||phase.includes('恢复')||phase.includes('连接暂时中断'))&&<div className="player-recovery-status" role="status"><LoaderCircle size={16} className="spin"/>{phase}</div>}
       {error&&<div className={`player-error ${current()?"switch-error":""}`}><RotateCcw size={28}/><h3>暂时无法播放</h3><p>{error}</p><button className="btn primary" onClick={()=>{const wanted=retryTarget.current??requested.current??current()?.target??target(starting.episode,starting.position),data=metadata.current.get(wanted.seriesId);if(data)void selectMedia(data,wanted.episode,false,wanted.start,false,true);}}>重试当前集</button></div>}
       <div className="player-controls" onClick={event => {

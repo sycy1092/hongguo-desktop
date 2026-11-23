@@ -43,8 +43,34 @@ def product_version():
     return "1.0.0"
 
 
+def _service_log(line: str) -> None:
+    """One line per access/error on stderr; the Electron supervisor persists it to service.log."""
+    try:
+        print(line, file=sys.stderr, flush=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _log_path(request) -> str:
+    path = request.url.path
+    if path.startswith("/media/session/"):
+        # 会话 id 是播放能力凭据，只保留文件名用于定位是哪个分片/清单。
+        parts = path.split("/")
+        path = "/media/session/<id>/" + (parts[4] if len(parts) > 4 else "")
+    return path
+
+
 def create_app(provider, token, media_manager=None, signer_ok=lambda: True):
     app = FastAPI(title="红果桌面播放服务", docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.middleware("http")
+    async def log_requests(request: Request, call_next):
+        started = time.monotonic()
+        response = await call_next(request)
+        elapsed = (time.monotonic() - started) * 1000
+        slow = " SLOW" if elapsed >= 10000 else ""
+        _service_log(f"[access] {response.status_code} {elapsed:.0f}ms {request.method} {_log_path(request)}{slow}")
+        return response
 
     @app.middleware("http")
     async def authenticate(request: Request, call_next):
@@ -70,6 +96,7 @@ def create_app(provider, token, media_manager=None, signer_ok=lambda: True):
 
     @app.exception_handler(ProviderError)
     async def provider_error(request, error):
+        _service_log(f"[error] {error.status} {error.code} {_log_path(request)}")
         return JSONResponse({"error": {"code": error.code, "message": error.message}}, status_code=error.status)
 
     @app.exception_handler(QrLoginError)
