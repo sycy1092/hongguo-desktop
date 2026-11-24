@@ -165,9 +165,9 @@ export default function App() {
     const seriesId=value.series.id,preferred=latestSettings.current.quality;
     const duration=value.episodes.find(item=>item.index===index)?.duration;
     // 和播放器用同一条规则选画质，避免同一集被下载两份。
-    void chooseStartQuality(window.hongguo,seriesId,index,preferred).then(quality=>{
+    void chooseStartQuality(window.hongguo,seriesId,index,preferred).then(choice=>{
       if(latestSettings.current.quality!==preferred)return;
-      mediaPreload(window.hongguo).prepare({seriesId,episode:index,quality,start:position,duration});
+      mediaPreload(window.hongguo).prepare({seriesId,episode:index,quality:choice.quality,start:position,duration});
     }).catch(()=>{});
   };
   const openDetail = async (series: Series, autoplay = false, progress?: HistoryItem) => {

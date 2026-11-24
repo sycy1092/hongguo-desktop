@@ -18,12 +18,18 @@ export function downgrade(value: string): string {
   return value;
 }
 
+export interface StartChoice {
+  quality: string;
+  /** true 表示这一档在本地已有片源；false 表示要现下，界面才该提示“还没缓存”。 */
+  cached: boolean;
+}
+
 export async function chooseStartQuality(
   bridge: Transport,
   seriesId: string,
   episode: number,
   preferred: string,
-): Promise<string> {
+): Promise<StartChoice> {
   const ready = (quality: string) =>
     bridge
       .request<{ ready: boolean }>('/media/probe', {
@@ -43,7 +49,7 @@ export async function chooseStartQuality(
     current = next;
   }
   for (const quality of candidates) {
-    if (await ready(quality)) return quality;
+    if (await ready(quality)) return { quality, cached: true };
   }
-  return downgrade(preferred);
+  return { quality: downgrade(preferred), cached: false };
 }

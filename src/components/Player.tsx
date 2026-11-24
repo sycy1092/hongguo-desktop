@@ -6,7 +6,7 @@ import {WindowPlaybackLifecycle} from '../playback/WindowPlaybackLifecycle';
 import { HlsDeckLoader, type VideoDeck } from '../playback/HlsDeck';
 import {playbackBufferConfig} from '../playback/BufferBudget';
 import {adjacentEpisode,availablePosition,knownDuration} from '../playback/timeline';
-import {chooseStartQuality,downgrade} from '../playback/start-quality';
+import {chooseStartQuality,downgrade,type StartChoice} from '../playback/start-quality';
 import {loadWatched,markWatched,saveWatched} from '../watched';
 import {PlaybackEnd} from '../playback/PlaybackEnd';
 import {PlaybackTrace} from '../playback/PlaybackTrace';
@@ -195,10 +195,10 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   // 打开抽屉或切完集时刷新缓存标记。
   useEffect(()=>{if(drawer)void refreshCached();},[drawer,episode,refreshCached]);
   // 没缓存过的集按低一档起播（和详情页预加载用同一条规则，避免同一集下载两份）。
-  const chooseQuality=useCallback(async(data:SeriesDetail,index:number)=>{
+  const chooseQuality=useCallback(async(data:SeriesDetail,index:number):Promise<StartChoice>=>{
     const preferred=latest.current.settings.quality;
-    if(cachedPreferred.current.has(index))return preferred;
-    if(cachedFallback.current.has(index))return downgrade(preferred);
+    if(cachedPreferred.current.has(index))return {quality:preferred,cached:true};
+    if(cachedFallback.current.has(index))return {quality:downgrade(preferred),cached:true};
     return chooseStartQuality(window.hongguo,data.series.id,index,preferred);
   },[]);
   const applySound = (deck: VideoDeck) => { const s = latest.current.settings; deck.video.defaultPlaybackRate=s.rate;deck.video.playbackRate = s.rate; deck.video.volume = s.volume; deck.video.muted = mutedRef.current; };
@@ -242,7 +242,8 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const selectMedia=useCallback(async(data:SeriesDetail,index:number,automatic=false,start=0,keepPaused=false,force=false,{allow=()=>true,revealControls=true}:{allow?:()=>boolean;revealControls?:boolean}={})=>{
 
     if(!data.episodes.some(item=>item.index===index)||closed.current||!allow())return;
-    const next=targetFor(data,index,start,force?undefined:await chooseQuality(data,index)),displayed=current(),account=latest.current.accountKey;
+    const choice=force?{quality:latest.current.settings.quality,cached:true}:await chooseQuality(data,index);
+    const next=targetFor(data,index,start,force?undefined:choice.quality),displayed=current(),account=latest.current.accountKey;
     if(!force&&displayed?.target.seriesId===next.seriesId&&displayed.target.episode===index&&displayed.target.quality===next.quality&&Math.abs(displayed.target.start-start)<.1){if(revealControls)hide();return;}
     rememberDetail(data);
     requested.current = next;retryTarget.current=null; automaticSwitch.current = automatic;setAutomaticPreparing(automatic);
@@ -258,7 +259,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
 
       if (!committed || closed.current){if(requested.current===next){requested.current=null;setPendingEpisode(null);setPendingPosition(null);setAutomaticPreparing(false);}return;}
       requested.current = null; setPendingEpisode(null);setPendingPosition(null);setAutomaticPreparing(false);scheduleNext(committed);
-      if(next.quality!==latest.current.settings.quality)setNotice(`这一集还没缓存，先用 ${next.quality.toUpperCase()} 起播`);
+      if(!choice.cached)setNotice(`这一集还没缓存，先用 ${next.quality.toUpperCase()} 起播`);
     } catch (failure) {
       if (closed.current || requested.current !== next) return;
       retryTarget.current=next;requested.current=null;setPendingEpisode(null);setPendingPosition(null);setAutomaticPreparing(false); setPhase(''); setError((failure as Error).message || '视频准备失败，请重试'); setChrome(true);
