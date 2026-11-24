@@ -7,6 +7,7 @@ import { HlsDeckLoader, type VideoDeck } from '../playback/HlsDeck';
 import {playbackBufferConfig} from '../playback/BufferBudget';
 import {adjacentEpisode,availablePosition,knownDuration} from '../playback/timeline';
 import {chooseStartQuality,downgrade} from '../playback/start-quality';
+import {loadWatched,markWatched,saveWatched} from '../watched';
 import {PlaybackEnd} from '../playback/PlaybackEnd';
 import {PlaybackTrace} from '../playback/PlaybackTrace';
 import {SeasonContinuation,type SeasonDestination} from '../playback/SeasonContinuation';
@@ -67,6 +68,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const [danmakuPanel, setDanmakuPanel] = useState(false), [danmakuRefresh, setDanmakuRefresh] = useState(0);
   const [drawer, setDrawer] = useState(false);
   const [railIntro, setRailIntro] = useState(false);
+  const [watched, setWatched] = useState<Set<number>>(() => new Set());
   useEffect(() => {
     // Open the drawer with the episode being played already in view.
     if (!drawer) return;
@@ -139,6 +141,26 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   // 切集在等下一集片源时也要有可见进度：窗口全屏下标题行看不见。
   useEffect(()=>{setPendingSeconds(0);if(pendingEpisode===null)return;const timer=setInterval(()=>setPendingSeconds(value=>value+1),1000);return()=>clearInterval(timer);},[pendingEpisode]);
   // 默认按窗口布局播放（保留标题栏和页面信息）；需要沉浸时按 T 或点监视图标进窗口全屏。
+  // 已播放记录存在本机，按剧集维护；播到哪一集就记下哪一集。
+  useEffect(()=>{
+    const seriesId=latest.current.detail.series.id;
+    setWatched(new Set(loadWatched(seriesId)));
+    // 历史进度只用来看「之前看过多少集」，比对着补上标记。
+    void window.hongguo.getLibrary().then(library=>{
+      if(!mounted.current)return;
+      const row=library.history.find(item=>item.series.id===seriesId);
+      if(!row||!Number.isInteger(row.episode))return;
+      setWatched(previous=>{
+        const seeded=new Set(previous);
+        for(let index=1;index<=Math.min(row.episode,100000);index+=1)seeded.add(index);
+        return new Set(saveWatched(seriesId,[...seeded]));
+      });
+    }).catch(()=>{});
+  },[detail.series.id]);
+  const rememberWatched=useCallback((index:number)=>{
+    const seriesId=latest.current.detail.series.id;
+    setWatched(previous=>new Set(markWatched(seriesId,index,previous)));
+  },[]);
   // 哪些集已经有本地片源：切过去接近秒开，没有的要先下载 10～20 秒。
   const cachedPreferred=useRef<Set<number>>(new Set()),cachedFallback=useRef<Set<number>>(new Set()),cachedKnown=useRef(false);
   const refreshCached=useCallback(()=>{
@@ -525,7 +547,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
       <div className="fullscreen-toolbar"><div><button className="icon-button toolbar-back" title="返回" aria-label="退出播放" onClick={close}><ArrowLeft size={19}/></button><strong>{detail.series.title}</strong><span>第 {episode} 集</span></div><button className="icon-button" title={fullscreen?'退出全屏（Esc）':'退出窗口全屏（Esc）'} onClick={()=>{if(fullscreen)void toggleFullscreen();else toggleTheater();}}><Minimize size={20}/></button></div>
       {[0,1].map(index=><video key={index} ref={element=>{videos.current[index]=element;}} className="decoder-video" data-active={active===index?'true':'false'} data-series-id={active===index?detail.series.id:undefined} data-episode={active===index?episode:undefined} playsInline
         onClick={()=>{if(current()?.index!==index)return;clearTimeout(clickTimer.current);clickTimer.current=setTimeout(toggle,220);}} onDoubleClick={()=>{if(current()?.index!==index)return;clearTimeout(clickTimer.current);void toggleFullscreen();}}
-        onTimeUpdate={()=>onTime(index)} onDurationChange={()=>onTime(index)} onProgress={()=>onTime(index)} onPlaying={()=>{if(current()?.index!==index)return;setPlaying(true);setPhase('');if(automaticSwitch.current){automaticSwitch.current=false;setChrome(false);}else scheduleChromeHide();}}
+        onTimeUpdate={()=>onTime(index)} onDurationChange={()=>onTime(index)} onProgress={()=>onTime(index)} onPlaying={()=>{if(current()?.index!==index)return;setPlaying(true);setPhase('');rememberWatched(episode);if(automaticSwitch.current){automaticSwitch.current=false;setChrome(false);}else scheduleChromeHide();}}
       onPause={()=>{const deck=current();if(deck?.index!==index||!deck.video.paused)return;setPlaying(false);const naturallyEnding=latest.current.settings.autoplay&&deck.video.ended;
         // onEnded 有时不会到达（流被截断、时长未知），这里兜一下，避免停在片尾没有任何反应。
         if(naturallyEnding&&!requested.current&&!seasonPick.current)finishEpisode(deck);
@@ -564,7 +586,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
         <div className="player-drawer-body" ref={drawerBody}>
           <SeasonOverview series={detail.series} action="play" pendingId={pickingSeason} disabled={!current()} onSelect={series=>void selectSeason(series)}/>
           {cachedEpisodes.size>0&&<p className="drawer-legend"><i/>{cachedEpisodes.size} 集已有本地片源，切过去更快</p>}
-          <EpisodeGrid episodes={detail.episodes} episode={episode} cached={cachedEpisodes} onSelect={selectEpisode}/>
+          <EpisodeGrid episodes={detail.episodes} episode={episode} cached={cachedEpisodes} watched={watched} onSelect={selectEpisode}/>
         </div>
       </aside>}
       <dialog ref={shortcutDialog} className="player-shortcut-dialog" aria-labelledby="player-shortcut-title">
@@ -576,8 +598,8 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
     {seasonInfo.source===detail.series.id&&seasonInfo.phase!=='idle'&&<aside className="next-season-card" data-season-status={seasonInfo.phase} aria-live="polite"><div><small>{seasonInfo.destination?.detail?`第 ${seasonInfo.destination.result.nextSeason} 季 · 共 ${seasonInfo.destination.detail.series.totalEpisodes||seasonInfo.destination.detail.episodes.length} 集`:'下一季'}</small><strong>{seasonInfo.destination?.detail?.series.title||(seasonInfo.phase==='ambiguous'?'季关联暂不明确':seasonInfo.phase==='none'?'暂无已确认的下一季':'正在查找下一季')}</strong><span>{seasonInfo.error||(seasonInfo.phase==='ready'?'首集已准备好，季末自动衔接':seasonInfo.phase==='identified'?'已确认下一季，季末预热首集':seasonInfo.phase==='preparing'?'正在准备下一季首集':seasonInfo.phase==='looking'?'正在确认官方季关联':seasonInfo.phase==='ambiguous'?'存在多个候选，已暂停自动跨季':'本季结束后将停止播放')}</span></div>{['looking','preparing'].includes(seasonInfo.phase)&&<LoaderCircle className="spin" size={18}/>}<div className="next-season-actions">{seasonInfo.phase==='error'&&<button className="btn" onClick={retrySeason}>重试下一季</button>}{seasonInfo.destination?.detail&&atSeasonEnd&&<button className="btn primary" disabled={continuing} onClick={()=>void continueSeason(false)}>{continuing?'正在衔接':'播放下一季'}</button>}</div></aside>}
   </div>;
 }
-const EpisodeGrid=memo(function EpisodeGrid({episodes,episode,cached,onSelect}:{episodes:Episode[];episode:number;cached?:Set<number>;onSelect:(episode:number)=>void|Promise<void>}){
-  return <div className="episode-grid">{episodes.map(e=><button key={e.index} className={episode===e.index?'selected':''} aria-label={`播放第${e.index}集`} title={cached?.has(e.index)?'已缓存片源，切换更快':'切换前需要先取片源'} aria-current={episode===e.index?'true':undefined} onClick={()=>void onSelect(e.index)}>{e.index}{episode===e.index&&<span className="playing-bars">▥</span>}{cached?.has(e.index)&&episode!==e.index&&<i className="episode-cached" aria-hidden="true"/>}</button>)}</div>;
+const EpisodeGrid=memo(function EpisodeGrid({episodes,episode,cached,watched,onSelect}:{episodes:Episode[];episode:number;cached?:Set<number>;watched?:Set<number>;onSelect:(episode:number)=>void|Promise<void>}){
+  return <div className="episode-grid">{episodes.map(e=><button key={e.index} className={episode===e.index?'selected':''} aria-label={`播放第${e.index}集`} title={[watched?.has(e.index)?'已播放':'',cached?.has(e.index)?'已缓存片源，切换更快':'切换前需要先取片源'].filter(Boolean).join(' · ')} aria-current={episode===e.index?'true':undefined} onClick={()=>void onSelect(e.index)}>{e.index}{watched?.has(e.index)&&episode!==e.index&&<i className="episode-watched" aria-label="已播放">✓</i>}{episode===e.index&&<span className="playing-bars">▥</span>}{cached?.has(e.index)&&episode!==e.index&&<i className="episode-cached" aria-hidden="true"/>}</button>)}</div>;
 });
 function Comments({seriesId,episode,onClose}:{seriesId:string;episode:number;onClose:()=>void}){
   const [page,setPage]=useState<CommentsPage>({items:[],total:0,cursor:0,hasMore:false}),[busy,setBusy]=useState(true),[error,setError]=useState('');const generation=useRef(0);

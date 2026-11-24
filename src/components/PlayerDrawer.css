@@ -15,6 +15,8 @@
 .player-drawer .episode-grid .selected{border-color:rgba(var(--brand-rgb),.65);background:rgba(var(--brand-rgb),.2);color:#fff}
 /* 已缓存片源的集：右上角一个小圆点，切过去基本是秒开。 */
 .player-drawer .episode-grid button .episode-cached{position:absolute;top:4px;right:5px;width:5px;height:5px;border-radius:50%;background:#5cc98a;box-shadow:0 0 0 1px #0b0b0d66}
+/* 已播放过的集：左上角一个对勾。 */
+.player-drawer .episode-grid button .episode-watched{position:absolute;top:2px;left:4px;font-style:normal;font-size:10px;line-height:1;color:#8fb7ff;text-shadow:0 1px 2px #0008}
 .player-drawer .drawer-legend{display:flex;align-items:center;gap:6px;margin:0 0 10px;color:#9b9ba4;font-size:11px}
 .player-drawer .drawer-legend i{width:5px;height:5px;border-radius:50%;background:#5cc98a;display:inline-block}
 /* 抽屉开着时把控制栏和全屏标题栏抬到最上层；控制栏给不透明底，集数不再透出来。 */
