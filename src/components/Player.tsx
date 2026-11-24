@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Play, Pause, SkipForward, Volume2, VolumeX, Maximize, Minimize, MessageSquare, RotateCcw, ChevronRight, X, Heart, Monitor, SlidersHorizontal, LoaderCircle, Keyboard, ListVideo } from 'lucide-react';
+import { ArrowLeft, Play, Pause, SkipForward, Volume2, VolumeX, Maximize, Minimize, MessageSquare, RotateCcw, ChevronRight, X, Heart, Monitor, SlidersHorizontal, LoaderCircle, Keyboard, ListVideo, Copy, Share2, Info } from 'lucide-react';
 import type { CommentsPage, Episode, Series, SeriesDetail, Settings } from '../../shared/contracts';
 import { SeamlessSwitcher, type PlaybackTarget } from '../playback/SeamlessSwitcher';
 import {WindowPlaybackLifecycle} from '../playback/WindowPlaybackLifecycle';
@@ -66,6 +66,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const [cachedEpisodes,setCachedEpisodes]=useState<Set<number>>(()=>new Set());
   const [danmakuPanel, setDanmakuPanel] = useState(false), [danmakuRefresh, setDanmakuRefresh] = useState(0);
   const [drawer, setDrawer] = useState(false);
+  const [railIntro, setRailIntro] = useState(false);
   useEffect(() => {
     // Open the drawer with the episode being played already in view.
     if (!drawer) return;
@@ -137,9 +138,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   useEffect(()=>{setPhaseSeconds(0);if(!phase)return;const timer=setInterval(()=>setPhaseSeconds(value=>value+1),1000);return()=>clearInterval(timer);},[phase]);
   // 切集在等下一集片源时也要有可见进度：窗口全屏下标题行看不见。
   useEffect(()=>{setPendingSeconds(0);if(pendingEpisode===null)return;const timer=setInterval(()=>setPendingSeconds(value=>value+1),1000);return()=>clearInterval(timer);},[pendingEpisode]);
-  // 播放页默认就是窗口全屏；用户按 T / 点监视图标退出后不再自动进入。
-  const autoTheater=useRef(false);
-  useEffect(()=>{if(autoTheater.current)return;autoTheater.current=true;const frame=requestAnimationFrame(()=>{if(!theaterRef.current&&mounted.current)toggleTheater();});return()=>cancelAnimationFrame(frame);},[toggleTheater]);
+  // 默认按窗口布局播放（保留标题栏和页面信息）；需要沉浸时按 T 或点监视图标进窗口全屏。
   // 哪些集已经有本地片源：切过去接近秒开，没有的要先下载 10～20 秒。
   const cachedPreferred=useRef<Set<number>>(new Set()),cachedFallback=useRef<Set<number>>(new Set()),cachedKnown=useRef(false);
   const refreshCached=useCallback(()=>{
@@ -504,11 +503,24 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const phaseLabel = phaseSeconds >= 3 ? `${phase}（已等 ${phaseSeconds} 秒${phaseSeconds >= 15 ? '，仍在重试' : ''}）` : phase;
   const pendingLabel = pendingEpisode === null ? '' : `正在准备第 ${pendingEpisode} 集${pendingSeconds >= 3 ? `（已等 ${pendingSeconds} 秒）` : ''}`;
   const sliderPosition = duration ? Math.min(duration, pendingPosition ?? position) : 0;
+  const copyText = async (text: string, message: string) => {
+    try { await navigator.clipboard.writeText(text); setNotice(message); }
+    catch { setNotice('复制失败，请手动选择标题'); }
+  };
   return <div className={`player-page ${theater?'player-theater':''}`}>
     <div className="player-heading"><button className="btn" onClick={close}><ArrowLeft size={17}/> 返回</button><div className="player-heading-title"><h2>{detail.series.title}</h2>{playerGenres.length>0&&<div className="player-heading-genres" aria-label="本剧类型"><small>类型</small>{playerGenres.map(tag=><span key={tag}>{tag}</span>)}</div>}<span>第 {episode} 集 · 共 {detail.episodes.length} 集</span>{pendingEpisode&&<small className="switch-status">{pendingPosition!==null?`正在定位到 ${time(pendingPosition)}`:`正在准备第 ${pendingEpisode} 集，保留当前画面`}</small>}</div>{detail.series.intro.trim()&&<p className="player-heading-intro" title={detail.series.intro}>{detail.series.intro}</p>}<button className={`icon-button player-favorite ${favorite?'active':''}`} title={favoriteBusy?'正在同步收藏':favorite?'取消收藏':'收藏'} aria-label={favoriteBusy?'正在同步收藏':favorite?'取消收藏':'收藏'} aria-pressed={favorite} disabled={favoriteBusy} onClick={()=>void changeFavorite()}>{favoriteBusy?<LoaderCircle className="spin" size={20}/>:<Heart size={20} fill={favorite?'currentColor':'none'}/>}</button></div>
     <div className="playback-layout" ref={playbackLayout}><div className={stageClassName} onMouseMove={hide} onMouseLeave={()=>{if(playing&&!danmakuPanelRef.current&&!drawerRef.current)setChrome(false);}}>
 
       <div className="window-drag-region" aria-hidden="true" />
+      <aside className={`player-rail ${chrome?'':'faded'}`} aria-label="播放操作">
+        <button className={favorite?'active':''} title={favoriteBusy?'正在同步收藏':favorite?'取消收藏':'收藏'} aria-pressed={favorite} disabled={favoriteBusy} onClick={()=>void changeFavorite()}>{favoriteBusy?<LoaderCircle className="spin" size={18}/>:<Heart size={19} fill={favorite?'currentColor':'none'}/>}<span>收藏</span></button>
+        <button title="复制剧名与集数" onClick={()=>void copyText(`${detail.series.title} 第${episode}集`, '已复制剧名')}><Copy size={18}/><span>剧名</span></button>
+        <button title="复制分享文案" onClick={()=>void copyText(`${detail.series.title} 第${episode}集`, '已复制分享文案')}><Share2 size={18}/><span>分享</span></button>
+        <button className={comments?'active':''} title="评论" aria-pressed={comments} onClick={()=>setComments(v=>!v)}><MessageSquare size={18}/><span>评论</span></button>
+        <button className={danmakuPanel?'active':''} title="弹幕设置" aria-pressed={danmakuPanel} onClick={toggleDanmakuPanel}><SlidersHorizontal size={18}/><span>弹幕</span></button>
+        <button className={railIntro?'active':''} title="剧情简介" aria-pressed={railIntro} onClick={()=>setRailIntro(v=>!v)}><Info size={18}/><span>简介</span></button>
+      </aside>
+      {railIntro&&<section className="player-intro-pop" role="dialog" aria-label="剧情简介"><header><strong>剧情简介</strong><button className="icon-button" aria-label="关闭简介" onClick={()=>setRailIntro(false)}><X size={16}/></button></header><p>{detail.series.intro.trim()||'暂无简介'}</p></section>}
       {!current()&&!error&&<div className="player-startup-cover" aria-hidden="true">{detail.series.cover&&<img src={detail.series.cover} alt=""/>}<div/></div>}
       <div className="fullscreen-toolbar"><div><button className="icon-button toolbar-back" title="返回" aria-label="退出播放" onClick={close}><ArrowLeft size={19}/></button><strong>{detail.series.title}</strong><span>第 {episode} 集</span></div><button className="icon-button" title={fullscreen?'退出全屏（Esc）':'退出窗口全屏（Esc）'} onClick={()=>{if(fullscreen)void toggleFullscreen();else toggleTheater();}}><Minimize size={20}/></button></div>
       {[0,1].map(index=><video key={index} ref={element=>{videos.current[index]=element;}} className="decoder-video" data-active={active===index?'true':'false'} data-series-id={active===index?detail.series.id:undefined} data-episode={active===index?episode:undefined} playsInline
