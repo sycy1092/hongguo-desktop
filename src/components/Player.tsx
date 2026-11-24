@@ -155,7 +155,8 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   useEffect(()=>{setCachedEpisodes(new Set());void refreshCached();},[detail.series.id,refreshCached]);
   // 当前集播起来就把后面几集的片源温到本地（服务端排队逐个下载），连播/切集不用等。
   const prefetchNext=useCallback((data:SeriesDetail,index:number)=>{
-    const quality=latest.current.settings.quality;
+    // 预热用降一档画质：链路慢时能在一集播完前下完，切过去就是秒开。
+    const quality=downgrade(latest.current.settings.quality);
     let cursor=index;
     for(let step=0;step<3;step+=1){
       const target=adjacentEpisode(data.episodes,cursor,1);

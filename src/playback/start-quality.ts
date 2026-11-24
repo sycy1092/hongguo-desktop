@@ -24,7 +24,6 @@ export async function chooseStartQuality(
   episode: number,
   preferred: string,
 ): Promise<string> {
-  if (!['auto', '1080p', '720p', '540p'].includes(preferred)) return preferred;
   const ready = (quality: string) =>
     bridge
       .request<{ ready: boolean }>('/media/probe', {
@@ -34,8 +33,17 @@ export async function chooseStartQuality(
       })
       .then(value => !!value?.ready)
       .catch(() => false);
-  if (await ready(preferred)) return preferred;
-  const fallback = downgrade(preferred);
-  if (fallback === preferred) return preferred;
-  return fallback;
+  // 先找本地已有的档位（任何一档都比现下快），再按降档顺序回退。
+  const candidates: string[] = [];
+  let current = preferred;
+  for (let step = 0; step < 3; step += 1) {
+    if (!candidates.includes(current)) candidates.push(current);
+    const next = downgrade(current);
+    if (next === current) break;
+    current = next;
+  }
+  for (const quality of candidates) {
+    if (await ready(quality)) return quality;
+  }
+  return downgrade(preferred);
 }

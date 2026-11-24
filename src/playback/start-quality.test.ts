@@ -15,7 +15,7 @@ describe('起播画质选择', () => {
     expect(await chooseStartQuality(bridge as never, '123', 5, '1080p')).toBe('1080p');
   });
 
-  it('首选不在本地时降一档，并用 probe 询问', async () => {
+  it('首选不在本地时逐个探更低档位，最后降一档起播', async () => {
     const seen: string[] = [];
     const bridge = {
       request: async (_path: string, options?: { body?: { quality?: string } }) => {
@@ -24,7 +24,15 @@ describe('起播画质选择', () => {
       },
     };
     expect(await chooseStartQuality(bridge as never, '123', 5, 'auto')).toBe('720p');
-    expect(seen).toEqual(['auto']);
+    expect(seen).toEqual(['auto', '720p', '540p']);
+  });
+
+  it('低一档已有缓存时直接用它', async () => {
+    const bridge = {
+      request: async (_path: string, options?: { body?: { quality?: string } }) =>
+        ({ ready: String(options?.body?.quality) === '720p' }),
+    };
+    expect(await chooseStartQuality(bridge as never, '123', 5, 'auto')).toBe('720p');
   });
 
   it('probe 失败时也返回降档结果', async () => {
