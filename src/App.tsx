@@ -2,6 +2,7 @@ import { ArrowLeft, ArrowRight, Bookmark, CalendarClock, Check, ChevronRight, Cl
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Genre, HistoryItem, Library, Series, SeriesDetail, Session, Settings as Preferences } from '../shared/contracts';
 import Catalog from './components/Catalog';
+import { chooseStartQuality } from './playback/start-quality';
 import type { CatalogPage } from './components/Catalog';
 import Account from './components/Account';
 import Settings from './components/Settings';
@@ -160,7 +161,15 @@ export default function App() {
     if (identity === account.current) setLibrary(current);
   };
   const closeDetail = useCallback((preservePrepared=false) => {clearTimeout(preloadTimer.current);if(!preservePrepared)mediaPreload(window.hongguo).clear();requests.current++; setDetailId(''); setDetail(null); setDetailError(''); }, []);
-  const prepareEpisode=(value:SeriesDetail,index:number,position=0)=>{mediaPreload(window.hongguo).prepare({seriesId:value.series.id,episode:index,quality:latestSettings.current.quality,start:position,duration:value.episodes.find(item=>item.index===index)?.duration});};
+  const prepareEpisode=(value:SeriesDetail,index:number,position=0)=>{
+    const seriesId=value.series.id,preferred=latestSettings.current.quality;
+    const duration=value.episodes.find(item=>item.index===index)?.duration;
+    // 和播放器用同一条规则选画质，避免同一集被下载两份。
+    void chooseStartQuality(window.hongguo,seriesId,index,preferred).then(quality=>{
+      if(latestSettings.current.quality!==preferred)return;
+      mediaPreload(window.hongguo).prepare({seriesId,episode:index,quality,start:position,duration});
+    }).catch(()=>{});
+  };
   const openDetail = async (series: Series, autoplay = false, progress?: HistoryItem) => {
     void loadPlayer().catch(()=>{});
     clearTimeout(preloadTimer.current);mediaPreload(window.hongguo).clear();
