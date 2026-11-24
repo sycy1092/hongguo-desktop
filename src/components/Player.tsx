@@ -143,7 +143,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   // 哪些集已经有本地片源：切过去接近秒开，没有的要先下载 10～20 秒。
   const cachedPreferred=useRef<Set<number>>(new Set()),cachedFallback=useRef<Set<number>>(new Set()),cachedKnown=useRef(false);
   const refreshCached=useCallback(()=>{
-    const seriesId=latest.current.detail.series.id,preferred=latest.current.settings.quality,fallback=preferred==='1080p'?'720p':preferred;
+    const seriesId=latest.current.detail.series.id,preferred=latest.current.settings.quality,fallback=downgrade(preferred);
     const ask=(quality:string)=>window.hongguo.request<{episodes:number[]}>('/media/cached',{method:'POST',body:{seriesId,quality}})
       .then(value=>new Set(value.episodes||[])).catch(()=>new Set<number>());
     return Promise.all([ask(preferred),ask(fallback)]).then(([first,second])=>{
@@ -210,7 +210,12 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const scheduleNext = useCallback((deck: VideoDeck) => {
     if (!latest.current.isActive || !visible.current||deck.target.seriesId!==latest.current.detail.series.id) return;
     const next = adjacentEpisode(latest.current.detail.episodes, deck.target.episode, 1);
-    if (next !== undefined) switcher.current?.warm(target(next));
+    if (next !== undefined) {
+      // 预热用和起播同一条画质规则，避免同一集被两条会话各下一份。
+      const preferred = latest.current.settings.quality;
+      const quality = cachedPreferred.current.has(next) ? preferred : downgrade(preferred);
+      switcher.current?.warm(targetFor(latest.current.detail, next, 0, quality));
+    }
     if(nearEnd(deck)){const destination=seasonRef.current.destination;if(destination?.detail)prepareSeason(destination);else if(seasonRef.current.phase==='idle')void lookupSeason();}
   }, [lookupSeason,prepareSeason]);
   const selectMedia=useCallback(async(data:SeriesDetail,index:number,automatic=false,start=0,keepPaused=false,force=false,{allow=()=>true,revealControls=true}:{allow?:()=>boolean;revealControls?:boolean}={})=>{
