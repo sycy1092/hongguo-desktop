@@ -11,6 +11,16 @@
 .player-startup-cover{position:absolute;inset:0;z-index:2;overflow:hidden;background:linear-gradient(135deg,#291b2b,#151922);pointer-events:none}.player-startup-cover img{width:100%;height:100%;object-fit:cover;object-position:center 35%;filter:blur(5px) brightness(.42);transform:scale(1.04)}.player-startup-cover>div{position:absolute;inset:0;background:linear-gradient(transparent,#10101680)}.video-stage .player-status{z-index:2}
 .player-theater{position:fixed;inset:0;z-index:40;max-width:none;margin:0;padding:0;background:#000;animation:none}
 .player-preparing{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:4;display:flex;align-items:center;gap:9px;padding:11px 18px;border-radius:999px;background:#0b0b0dcc;color:#fff;font-size:12.5px;line-height:1.4;box-shadow:0 8px 24px #0006;backdrop-filter:blur(6px);pointer-events:none}
+/* 视频左上角浮层：返回 + 剧名 + 集数 + 简介（替代原来的页面标题区） */
+.player-page{max-width:none;margin:0;padding:0}
+.player-overlay-head{position:absolute;left:0;right:0;top:0;z-index:5;display:flex;align-items:flex-start;gap:12px;padding:16px 20px 46px;background:linear-gradient(#000000a6,transparent);pointer-events:none}
+.player-overlay-head .overlay-back{pointer-events:auto;width:34px;height:34px;flex-shrink:0;color:#fff;background:#0b0b0db3;border:1px solid #ffffff26}
+.player-overlay-head .overlay-back:hover{background:#ffffff26}
+.player-overlay-head .overlay-copy{min-width:0;max-width:min(52%,640px);display:flex;flex-direction:column;gap:3px}
+.player-overlay-head small{font-size:11px;color:#c9c9d3}
+.player-overlay-head strong{font-size:17px;font-weight:600;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.player-overlay-head .overlay-intro{margin:2px 0 0;font-size:11.5px;line-height:1.6;color:#b9b9c4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.player-page .content-scroll,.playback-layout{overflow:hidden}
 /* 右侧操作栏：收藏 / 剧名 / 分享 / 评论 / 弹幕 / 简介 */
 .player-rail{position:absolute;right:14px;top:50%;transform:translateY(-50%);z-index:5;display:flex;flex-direction:column;gap:9px;transition:opacity .2s}
 .player-rail.faded{opacity:.85}

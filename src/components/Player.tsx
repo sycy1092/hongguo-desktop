@@ -531,10 +531,17 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
     catch { setNotice('复制失败，请手动选择标题'); }
   };
   return <div className={`player-page ${theater?'player-theater':''}`}>
-    <div className="player-heading"><button className="btn" onClick={close}><ArrowLeft size={17}/> 返回</button><div className="player-heading-title"><h2>{detail.series.title}</h2>{playerGenres.length>0&&<div className="player-heading-genres" aria-label="本剧类型"><small>类型</small>{playerGenres.map(tag=><span key={tag}>{tag}</span>)}</div>}<span>第 {episode} 集 · 共 {detail.episodes.length} 集</span>{pendingEpisode&&<small className="switch-status">{pendingPosition!==null?`正在定位到 ${time(pendingPosition)}`:`正在准备第 ${pendingEpisode} 集，保留当前画面`}</small>}</div>{detail.series.intro.trim()&&<p className="player-heading-intro" title={detail.series.intro}>{detail.series.intro}</p>}<button className={`icon-button player-favorite ${favorite?'active':''}`} title={favoriteBusy?'正在同步收藏':favorite?'取消收藏':'收藏'} aria-label={favoriteBusy?'正在同步收藏':favorite?'取消收藏':'收藏'} aria-pressed={favorite} disabled={favoriteBusy} onClick={()=>void changeFavorite()}>{favoriteBusy?<LoaderCircle className="spin" size={20}/>:<Heart size={20} fill={favorite?'currentColor':'none'}/>}</button></div>
     <div className="playback-layout" ref={playbackLayout}><div className={stageClassName} onMouseMove={hide} onMouseLeave={()=>{if(playing&&!danmakuPanelRef.current&&!drawerRef.current)setChrome(false);}}>
 
       <div className="window-drag-region" aria-hidden="true" />
+      <div className="player-overlay-head">
+        <button className="icon-button overlay-back" title="返回" aria-label="退出播放" onClick={close}><ArrowLeft size={18}/></button>
+        <div className="overlay-copy">
+          <small>{pendingEpisode?`正在准备第 ${pendingEpisode} 集${pendingSeconds>=3?`（已等 ${pendingSeconds} 秒）`:''}`:`正在观看 · 第 ${episode} / ${detail.episodes.length} 集`}</small>
+          <strong title={detail.series.title}>{detail.series.title}</strong>
+          {detail.series.intro.trim()&&<p className="overlay-intro" title={detail.series.intro}>{detail.series.intro}</p>}
+        </div>
+      </div>
       <aside className={`player-rail ${chrome?'':'faded'}`} aria-label="播放操作">
         <button className={favorite?'active':''} title={favoriteBusy?'正在同步收藏':favorite?'取消收藏':'收藏'} aria-pressed={favorite} disabled={favoriteBusy} onClick={()=>void changeFavorite()}>{favoriteBusy?<LoaderCircle className="spin" size={18}/>:<Heart size={19} fill={favorite?'currentColor':'none'}/>}<span>收藏</span></button>
         <button title="复制剧名与集数" onClick={()=>void copyText(`${detail.series.title} 第${episode}集`, '已复制剧名')}><Copy size={18}/><span>剧名</span></button>
