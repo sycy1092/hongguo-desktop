@@ -374,6 +374,7 @@ class MediaManager:
                     messages = {
                         "MEDIA_ACCESS_RESTRICTED": "官网暂未开放这集的播放权限，已保留当前进度",
                         "MEDIA_WEB_UNAVAILABLE": "官网播放线路暂时不可用，请重试当前集",
+                        "MEDIA_RECENTLY_FAILED": "这集刚刚取源失败，等几分钟再试",
                         "MEDIA_DOWNLOAD_FAILED": "各播放线路暂时连接失败，请重试当前集",
                         "MEDIA_CODEC_UNSUPPORTED": "这集暂未取得兼容片源，请重试或更换画质",
                         "MEDIA_DECRYPT_FAILED": "这集片源暂时无法解码，请更换画质重试",

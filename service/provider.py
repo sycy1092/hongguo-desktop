@@ -43,6 +43,10 @@ ACCOUNT_UID_MAX_LENGTH = 512
 QUALITIES = {"auto", "1080p", "720p", "540p", "480p", "360p"}
 SORTS = {"online_time", "hot_score", "hot_collect"}
 CODECS = {"bytevc1", "hevc", "h265", "hvc1", "avc1", "h264"}
+# 刚失败过的集短时间内直接返回同样的错误，别让用户再等一整轮上游重试。
+SOURCE_FAILURE_COOLDOWN = 180
+SOURCE_FAILURE_CODES = {"MEDIA_WEB_UNAVAILABLE", "MEDIA_ACCESS_RESTRICTED", "MEDIA_DOWNLOAD_FAILED",
+                        "MEDIA_SOURCE_EMPTY", "MEDIA_DECRYPT_FAILED", "MEDIA_CODEC_UNSUPPORTED"}
 # Distinguishes "the reservation list could not be read" from "the reservation is not in it".
 _UNREADABLE = object()
 
@@ -377,10 +381,12 @@ class Provider:
         self.catalog_cache = CatalogCache(self.data_dir / "catalog-cache.json")
         self._source_guard = threading.Condition()
         self._sources_running = set()
+        self._source_failures = {}
         self._prefetched = set()
         self._prefetch_guard = threading.Lock()
         self._prefetch_queue = []
         self._prefetch_worker = None
+        self._v5_guard = threading.Lock()
         self._leases = {}
         self._write_lock = threading.Lock()
         self.qr_login = QrLoginManager(self.account, self._commit_qr_session,
@@ -1701,6 +1707,10 @@ class Provider:
             raise ProviderError("EPISODE_NOT_FOUND", "这集不存在", 404)
         key = f"{target['vid']}_{quality}"
         out = self.source_dir / f"{key}.mp4"
+        # 同一集刚刚被上游拒绝时不要再让用户等满 50 秒重试一遍。
+        failure = self._source_failures.get(key)
+        if failure and time.time() - failure[0] < SOURCE_FAILURE_COOLDOWN:
+            raise ProviderError("MEDIA_RECENTLY_FAILED", "这集刚刚取源失败，稍等几分钟再试", 429)
         with self._source_guard:
             while key in self._sources_running:
                 self._cancel(cancelled)
@@ -1721,13 +1731,19 @@ class Provider:
             def mobile_tracks(force):
                 # Preserve authentication and safety failures before _read maps
                 # generic SDK errors to a temporary upstream outage.
+                tracks = None
                 try:
                     models = self.sdk.get_video_tracks([target["vid"]], **({"force": True} if force else {}))
+                    tracks = models.get(target["vid"]) if isinstance(models, dict) else None
                 except AuthExpiredError:
                     raise ProviderError("AUTH_EXPIRED", "手机登录态已失效，请重新登录后播放", 401) from None
                 except RiskControlError:
                     raise ProviderError("UPSTREAM_RISK_CONTROL", "手机播放线路触发安全验证，请稍后重试", 429) from None
-                tracks = models.get(target["vid"]) if isinstance(models, dict) else None
+                except Exception:
+                    # 网页签名对这个接口已经不返回数据，直接换 SDK v5 会话。
+                    tracks = None
+                if not isinstance(tracks, list) or not tracks:
+                    tracks = self._v5_tracks(target["vid"])
                 if not isinstance(tracks, list) or not tracks:
                     raise ProviderError("MEDIA_SOURCE_EMPTY", "手机暂未返回这集的播放地址，请重试当前集")
                 return tracks
@@ -1826,8 +1842,13 @@ class Provider:
             os.replace(partial, out)
             with self._source_guard:
                 self._leases[str(out)] = self._leases.get(str(out), 0) + 1
+            self._source_failures.pop(key, None)
             self._prune_sources()
             return out
+        except ProviderError as error:
+            if error.code in SOURCE_FAILURE_CODES:
+                self._source_failures[key] = (time.time(), error.code, error.message, error.status)
+            raise
         finally:
             try:
                 for path in (encrypted, raw, partial):
@@ -1844,6 +1865,34 @@ class Provider:
 
     def _source_path(self, row, quality):
         return self.source_dir / f"{row['vid']}_{quality}.mp4"
+
+    def _v5_device(self):
+        """Saved anonymous device for SDK v5 playback; registered once on first use."""
+        from vendor import playback_v5  # noqa: F401  (puts the protocol modules on sys.path)
+        import phone_account_device
+        with self._v5_guard:
+            path = self.data_dir / "playback-spare.dpapi"
+            context = phone_account_device.load_context(path) if path.is_file() else None
+            if context is None:
+                phone_account_device.initialize(path)
+                context = phone_account_device.load_context(path)
+            return context
+
+    def _v5_tracks(self, vid):
+        """播放地址兜底：用 SDK v5（X-Medusa）会话取一次模型，失败返回 None。"""
+        try:
+            from vendor import playback_v5
+            from desktop_video_model import parse_video_model
+            model = playback_v5.lookup(self.data_dir, self._v5_device(), vid)
+            parsed = parse_video_model({"code": 0, "data": {"video_model": model}})
+            tracks = parsed.get("video_list") if isinstance(parsed, dict) else parsed
+            if isinstance(tracks, list) and tracks:
+                print(f"[media] v5 tracks ok ({len(tracks)} renditions)", file=sys.stderr, flush=True)
+                return tracks
+            return None
+        except Exception as error:  # noqa: BLE001
+            print(f"[media] v5 lookup failed {type(error).__name__} {str(error)[:80]}", file=sys.stderr, flush=True)
+            return None
 
     def cached_episodes(self, series_id, quality="auto"):
         """Episode indexes whose source mp4 is already on disk (no upstream call)."""
