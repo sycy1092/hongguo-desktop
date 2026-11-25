@@ -27,6 +27,7 @@ if _PHONE.is_dir() and str(_PHONE) not in sys.path:
 HOST = "api5-normal-sinfonlineb.fqnovel.com"
 MAX_BODY = 2 * 1024 * 1024
 SDK_VERSION_DIR = "74332"
+_CORES = {}
 
 
 class PlaybackV5Error(RuntimeError):
@@ -74,9 +75,16 @@ def ensure_assets(data_dir, *, allow_download=False, donor=None):
 
 
 def _core_factory(image):
+    """Reuse the emulated SDK core: building it maps a 4.4 MB image each time."""
+    import hashlib
+
     from phone_sdk_core_v5 import SdkDigestCore
 
-    engine = SdkDigestCore(image)
+    key = hashlib.sha256(image).hexdigest()
+    engine = _CORES.get(key)
+    if engine is None or engine.heap >= engine.HEAP + 0x600000:
+        engine = SdkDigestCore(image)
+        _CORES[key] = engine
 
     def core(payload, mode, seconds):
         return engine.digest(payload, mode, seconds)[0][:16]

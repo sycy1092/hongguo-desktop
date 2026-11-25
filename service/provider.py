@@ -1729,9 +1729,12 @@ class Provider:
                 return number(re.sub(r"\D", "", str((track.get("video_meta") or {}).get("definition") or "")))
 
             def mobile_tracks(force):
+                # 上游播放接口现在只认 SDK v5 会话：先走它，失败再试网页签名。
+                tracks = self._v5_tracks(target["vid"])
+                if isinstance(tracks, list) and tracks:
+                    return tracks
                 # Preserve authentication and safety failures before _read maps
                 # generic SDK errors to a temporary upstream outage.
-                tracks = None
                 try:
                     models = self.sdk.get_video_tracks([target["vid"]], **({"force": True} if force else {}))
                     tracks = models.get(target["vid"]) if isinstance(models, dict) else None
@@ -1740,10 +1743,7 @@ class Provider:
                 except RiskControlError:
                     raise ProviderError("UPSTREAM_RISK_CONTROL", "手机播放线路触发安全验证，请稍后重试", 429) from None
                 except Exception:
-                    # 网页签名对这个接口已经不返回数据，直接换 SDK v5 会话。
                     tracks = None
-                if not isinstance(tracks, list) or not tracks:
-                    tracks = self._v5_tracks(target["vid"])
                 if not isinstance(tracks, list) or not tracks:
                     raise ProviderError("MEDIA_SOURCE_EMPTY", "手机暂未返回这集的播放地址，请重试当前集")
                 return tracks
