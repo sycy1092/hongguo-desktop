@@ -372,6 +372,9 @@ class MediaManager:
                 # 不把 CDN 凭据、绝对路径或供应商响应内容返回给界面。
                 if job.phase == "error":
                     messages = {
+                        "UPSTREAM_TIMEOUT": "手机播放接口连接超时，请稍后重试当前集",
+                        "UPSTREAM_UNAVAILABLE": "手机播放接口暂时不可用，请稍后重试当前集",
+                        "MEDIA_SOURCE_EMPTY": "手机接口没有返回这集的播放地址，请稍后重试当前集",
                         "MEDIA_ACCESS_RESTRICTED": "官网暂未开放这集的播放权限，已保留当前进度",
                         "MEDIA_WEB_UNAVAILABLE": "官网播放线路暂时不可用，请重试当前集",
                         "MEDIA_RECENTLY_FAILED": "这集刚刚取源失败，等几分钟再试",
@@ -639,7 +642,8 @@ def mount_media(app, manager):
         except (ValueError, TypeError, OverflowError) as error:
             raise HTTPException(400, str(error)) from None
         except MediaBusy as error:
-            raise HTTPException(429, str(error), headers={"Retry-After": "1"}) from None
+            raise HTTPException(429, {"error": {"code": "MEDIA_BUSY", "message": str(error)}},
+                                headers={"Retry-After": "1"}) from None
 
     @app.get("/media/session/{identifier}")
     def get_session(identifier: str, request: Request):

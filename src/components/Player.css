@@ -37,6 +37,7 @@
 .player-intro-pop p{margin:0;font-size:12px;line-height:1.75;color:#c9c9d3}
 @media(max-width:980px){.player-rail{right:8px;gap:7px}.player-rail button{width:46px;padding:7px 3px;font-size:9px}.player-intro-pop{right:64px;width:min(280px,60vw)}}
 .fullscreen-toolbar .toolbar-back{width:30px;height:30px;flex-shrink:0;margin-right:-2px}
+.player-pip{border-radius:14px;overflow:hidden;box-shadow:0 18px 60px #000a}
 .player-theater>:not(.playback-layout){display:none}
 .player-theater .playback-layout:not(:fullscreen){width:100%;height:100%;min-height:0;max-height:none;border:0;border-radius:0;box-shadow:none;background:#000}
 .player-theater .playback-layout:not(:fullscreen) .video-stage{height:100%;min-height:0;max-height:none;width:100%;aspect-ratio:auto;background:#000}
@@ -50,5 +51,8 @@
 .video-stage.controls-hidden .fullscreen-toolbar:has(:focus-visible) { opacity: 1; }
 .video-stage.controls-hidden .fullscreen-toolbar button:focus-visible { pointer-events: auto; }
 .player-controls :is(button, select, input):focus-visible, .fullscreen-toolbar button:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.player-controls .timeline input { outline: 0; }
+.player-controls .timeline input:focus-visible { outline: 0; }
+.player-controls .timeline input:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px color-mix(in srgb,var(--brand) 70%,transparent); }
 .next-season-card{display:flex;align-items:center;gap:16px;margin:20px 0 0;padding:15px 18px;border:1px solid var(--border);border-radius:12px;background:var(--panel)}.next-season-card>div:first-child{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}.next-season-card small{color:var(--brand);font-size:11px}.next-season-card strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.next-season-card span{font-size:12px;color:var(--muted)}.next-season-card[data-season-status=ready]{border-color:color-mix(in srgb,var(--brand) 35%,var(--border))}.next-season-actions{display:flex;gap:8px;flex-shrink:0}.next-season-actions .btn{font-size:12px}.player-theater>.next-season-card{margin-left:32px;margin-right:32px}@media(max-width:1040px){.player-theater>.next-season-card{margin-left:23px;margin-right:23px}.next-season-card{padding:12px;gap:10px}}
 .player-heading .player-heading-genres{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 4px}.player-heading .player-heading-genres small{color:var(--muted);font-size:10px}.player-heading .player-heading-genres span{padding:2px 7px;border:1px solid #ffffff15;border-radius:5px;background:#ffffff0a;color:#d9cbd1;font-size:10px;line-height:1.35}
