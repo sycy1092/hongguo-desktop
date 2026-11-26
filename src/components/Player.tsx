@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { ArrowLeft, Play, Pause, SkipForward, Volume2, VolumeX, Maximize, Minimize, MessageSquare, RotateCcw, ChevronLeft, ChevronRight, X, Heart, Monitor, PictureInPicture2, SlidersHorizontal, LoaderCircle, Keyboard, ListVideo, Copy, Share2, Info } from 'lucide-react';
 import type { CommentsPage, Episode, Series, SeriesDetail, Settings } from '../../shared/contracts';
 import { SeamlessSwitcher, type PlaybackTarget } from '../playback/SeamlessSwitcher';
@@ -45,6 +46,8 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   const theaterScroll=useRef(0),theaterRef=useRef(false);
   const danmakuPanelRef = useRef(false);
   const drawerRef = useRef(false), drawerBody = useRef<HTMLDivElement>(null);
+  const controlsRef = useRef<HTMLDivElement | null>(null);
+  const [controlsHeight, setControlsHeight] = useState(0);
   const shortcutDialog = useRef<HTMLDialogElement>(null);
   const pendingDanmaku = useRef<DanmakuPreferences | null>(null);
   const favoritePending=useRef(false);
@@ -108,7 +111,22 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
   }, []);
   const save = useCallback(() => saveDeck(current()), [saveDeck]);
   const cancelSeasonPick=useCallback(()=>{if(!seasonPick.current)return;seasonPick.current=null;seasonPickSequence.current++;setPickingSeason('');switcher.current?.cancelPending();requested.current=null;setPendingEpisode(null);setPendingPosition(null);},[]);
-  const scheduleChromeHide = useCallback(() => { clearTimeout(hideTimer.current); if (danmakuPanelRef.current || drawerRef.current) return; hideTimer.current = setTimeout(() => { if (current()?.video && !current()?.video.paused && !danmakuPanelRef.current && !drawerRef.current) setChrome(false); }, 2500); }, []);
+  // 量一次控制栏高度，抽屉据此让出底部，避免集数被进度条挡住。
+  useEffect(()=>{
+    const node=controlsRef.current;
+    if(!node)return;
+    const measure=()=>setControlsHeight(Math.round(node.getBoundingClientRect().height));
+    measure();
+    if(typeof ResizeObserver!=='undefined'){
+      const observer=new ResizeObserver(measure);
+      observer.observe(node);
+      return ()=>observer.disconnect();
+    }
+    window.addEventListener('resize',measure);
+    return ()=>window.removeEventListener('resize',measure);
+  },[]);
+  const scheduleChromeHide = useCallback(() => { clearTimeout(hideTimer.current); if (danmakuPanelRef.current || drawerRef.current) return; hideTimer.current = setTimeout(
+    () => { if (current()?.video && !current()?.video.paused && !danmakuPanelRef.current && !drawerRef.current) setChrome(false); }, 2500); }, []);
   const hide = useCallback(() => { setChrome(true); scheduleChromeHide(); }, [scheduleChromeHide]);
   const openShortcuts = useCallback(() => {
     const dialog = shortcutDialog.current;
@@ -549,7 +567,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
     catch { setNotice('复制失败，请手动选择标题'); }
   };
   return <div className={`player-page ${theater?'player-theater':''}`}>
-    <div className="playback-layout" ref={playbackLayout}><div className={stageClassName} onMouseMove={hide} onMouseLeave={()=>{if(playing&&!danmakuPanelRef.current&&!drawerRef.current)setChrome(false);}}>
+    <div className="playback-layout" ref={playbackLayout}><div className={stageClassName} style={controlsHeight?({'--controls-h':`${controlsHeight}px`} as CSSProperties):undefined} onMouseMove={hide} onMouseLeave={()=>{if(playing&&!danmakuPanelRef.current&&!drawerRef.current)setChrome(false);}}>
 
       <div className="window-drag-region" aria-hidden="true" />
       <div className="player-overlay-head">
@@ -584,7 +602,7 @@ export default function Player({ detail:initialDetail, initialEpisode, initialPo
       {pendingEpisode!==null&&!error&&<div className="player-preparing" role="status"><LoaderCircle size={16} className="spin"/><span>{pendingLabel}</span></div>}
       {phase&&!error&&current()&&!automaticPreparing&&(phase==='缓冲中'||phase.includes('恢复')||phase.includes('连接暂时中断'))&&<div className="player-recovery-status" role="status"><LoaderCircle size={16} className="spin"/>{phase}</div>}
       {error&&<div className={`player-error ${current()?"switch-error":""}`}><RotateCcw size={28}/><h3>暂时无法播放</h3><p>{error}</p><button className="btn primary" onClick={()=>{const wanted=retryTarget.current??requested.current??current()?.target??target(starting.episode,starting.position),data=metadata.current.get(wanted.seriesId);if(data)void selectMedia(data,wanted.episode,false,wanted.start,false,true);}}>重试当前集</button></div>}
-      <div className="player-controls" onClick={event => {
+      <div className="player-controls" ref={controlsRef} onClick={event => {
         if (event.detail > 0) (event.target as Element).closest('button')?.blur();
         hide();
       }}>

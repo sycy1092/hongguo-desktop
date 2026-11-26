@@ -8,7 +8,7 @@
 .player-drawer header .icon-button:hover{background:#ffffff1a;color:#fff}
 .player-drawer-meta{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 18px;border-bottom:1px solid #ffffff0f;color:#9b9ba6;font-size:11px;flex-shrink:0}
 .player-drawer .autoplay-switch{margin:0;color:#c8c8d2;font-size:11px}
-.player-drawer-body{flex:1;min-height:0;overflow-y:auto;padding:14px 18px 96px;overscroll-behavior:contain}
+.player-drawer-body{flex:1;min-height:0;overflow-y:auto;padding:14px 18px 18px;overscroll-behavior:contain}
 .player-drawer .episode-grid{max-height:none;grid-template-columns:repeat(auto-fill,minmax(56px,1fr));gap:8px;padding:0}
 .player-drawer .episode-grid button{height:40px;border-color:#ffffff1f;background:#ffffff0f;color:#eee;font-size:13px}
 .player-drawer .episode-grid button:hover{background:#ffffff1f;border-color:rgba(var(--brand-rgb),.5);transform:none}
@@ -19,8 +19,9 @@
 .player-drawer .episode-grid button .episode-watched{position:absolute;top:2px;left:4px;font-style:normal;font-size:10px;line-height:1;color:#8fb7ff;text-shadow:0 1px 2px #0008}
 .player-drawer .drawer-legend{display:flex;align-items:center;gap:6px;margin:0 0 10px;color:#9b9ba4;font-size:11px}
 .player-drawer .drawer-legend i{width:5px;height:5px;border-radius:50%;background:#5cc98a;display:inline-block}
-/* 抽屉开着时把控制栏和全屏标题栏抬到最上层；控制栏给不透明底，集数不再透出来。 */
+/* 抽屉开着时控制栏保持可见；控制栏给不透明底，抽屉让出它的高度，集数不再被压住。 */
 .video-stage.drawer-open .player-controls{z-index:6;background:#0b0b0de6;backdrop-filter:blur(6px);border-radius:0 0 10px 0}
+.video-stage.drawer-open .player-drawer{bottom:var(--controls-h,120px);border-bottom-left-radius:10px}
 .video-stage.drawer-open .fullscreen-toolbar{right:min(380px,100%)}
 .player-drawer .season-overview{margin:0 0 14px;padding:0 0 14px;border-top:0;border-bottom:1px solid #ffffff14}
 .player-drawer .season-overview-heading{margin-bottom:10px;gap:8px}
@@ -38,5 +39,5 @@
 .player-drawer .season-overview-card>svg{color:#9b9ba6}
 .player-drawer .season-overview-hint,.player-drawer .season-overview-loading{font-size:11px;color:#9b9ba6}
 .player-drawer .season-overview-error{font-size:11px;color:#c8c8d2}
-@media(max-width:1040px){.player-drawer{width:min(330px,100%)}.player-drawer-body{padding:12px 14px 96px}.player-drawer header,.player-drawer-meta{padding-left:14px;padding-right:14px}.video-stage.drawer-open .fullscreen-toolbar{right:min(330px,100%)}}
+@media(max-width:1040px){.player-drawer{width:min(330px,100%)}.player-drawer-body{padding:12px 14px 18px}.player-drawer header,.player-drawer-meta{padding-left:14px;padding-right:14px}.video-stage.drawer-open .fullscreen-toolbar{right:min(330px,100%)}}
 @media(prefers-reduced-motion:reduce){.player-drawer{animation:none}}
